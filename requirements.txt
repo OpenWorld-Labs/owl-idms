@@ -1,0 +1,11 @@
+numpy
+torch
+torchvision
+boto3
+dotenv
+tqdm
+obsws-python
+opencv-python
+decord
+pandas
+toolz
