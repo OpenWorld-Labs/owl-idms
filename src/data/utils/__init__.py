@@ -9,6 +9,7 @@ from .utils import (
     _add_frame_column,
     _simplify_event_types,
     _collapse_by_frame,
+    _events_to_tensor,
 )
 
 # -- mouse processing
@@ -21,7 +22,7 @@ from .utils import (
 
 from .process_video import preprocess_video_frames, create_transforms
 from .process_actions import preprocess_actions
-from .build_datalist import process_clip_boundaries
+
 
 __all__ = [
     "warn_once",
@@ -35,6 +36,7 @@ __all__ = [
     "_add_frame_column",
     "_simplify_event_types",
     "_collapse_by_frame",
+    "_events_to_tensor",
     "_filter_mouse_moves",
     "_parse_mouse_args",
     "_aggregate_mouse_by_frame",
@@ -42,5 +44,4 @@ __all__ = [
     "preprocess_video_frames",
     "create_transforms",
     "preprocess_actions",
-    "process_clip_boundaries",
 ]   

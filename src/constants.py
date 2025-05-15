@@ -2,9 +2,13 @@
 FPS = 60
 
 # Root path to where all the data (mp4s and csvs) is
-ROOT_DIR = (
+RAW_DIR = (
     "/mnt/c/Users/samib/OneDrive/Desktop/OWL/vg_control/data_dump/games/" +
     "MCC-Win64-Shipping/"
+)
+
+ROOT_DIR = (
+    "/home/sboughanem/owl/owl_idms/processed/"
 )
 
 # Keys to extract from the data

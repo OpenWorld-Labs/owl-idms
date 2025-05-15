@@ -1,88 +1,62 @@
 from pathlib import Path
 from typing import Sequence, Callable, Literal
 
-import torch, decord, pandas as pd, json
+import torch, pandas as pd, json
 from torch.utils.data import Dataset
-import torch.utils.dlpack
-from torchvision import transforms
+
+from src.data.process_data import seek_tensors
 
 __all__ = ["InverseDynamicsDataset"]
 
-DECORD_CFG = dict(num_threads=2, ctx=decord.cpu(0))
-
-Div255 = transforms.Lambda(lambda x: x.float().div_(255.))
-
-class  _VideoCache(dict):
-    def __init__(self, decord_cfg: dict = DECORD_CFG):
-        super().__init__() ; self.decord_cfg = decord_cfg
-
-    def __missing__(self, key: Path):
-        vr = decord.VideoReader(str(key.absolute()), **self.decord_cfg)
-        self[key] = vr ; return vr
-
-
-class _ActionCache(dict):
-    def __missing__(self, vid_dir: Path):
-        btn   = torch.load(vid_dir / 'buttons_full.pt', mmap=True)
-        mouse = torch.load(vid_dir / 'mouse_full.pt', mmap=True)
-        self[vid_dir] = (btn, mouse) ; return (btn, mouse)
 
 class InverseDynamicsDataset(Dataset):
-    def __init__(self, datalist_csv: str | Path,
-                 root: str | Path,
-                 *,
-                 transform: Callable = Div255,
-                 decode_device: Literal['cpu', 'gpu'] = 'cpu',):
-        self.root = Path(root)
-        self.df = pd.read_csv(datalist_csv)
-        self.meta = json.load(open(datalist_csv.parent / "metadata.json"))
-        self.clip_size = self.meta['clip_size']
+    def __init__(self, datalist_filepath: str | Path, tensor_dir: str | Path, *,
+                 transform: Callable = None,
+                 map_location: torch.device = None):
+        self.datalist_filepath = Path(datalist_filepath)
+        self.tensor_dir = Path(tensor_dir)
+        self.datalist   = pd.read_csv(self.datalist_filepath)
+        self.meta       = json.load(open(self.datalist_filepath.parent / "metadata.json"))
+        self.transform  = transform
         
-        global DECORD_CFG
-        self.transform = transform
-        self.decode_device = decord.gpu(0) if decode_device == 'gpu' else decord.cpu(0)
-        # process-local caches
-        self._videos  = _VideoCache({**DECORD_CFG, 'ctx': self.decode_device})
-        self._actions = _ActionCache()
+        self.map_location = map_location
+        self.paths: dict[int, list[Path, Path, Path]] = seek_tensors(self.tensor_dir)
 
-    def _get_video(self, path_rel: str) -> decord.VideoReader: 
-        return self._videos[self.root / path_rel]
+    def _get_video(self, path: Path) -> torch.Tensor: 
+        return torch.load(path, map_location=self.map_location, mmap=True)
 
-    def _get_actions(self, path_rel: str) -> tuple[torch.Tensor, torch.Tensor]:
-        return self._actions[(self.root / path_rel).parent]
+    def _get_actions(self, btn_path: Path, mouse_path: Path) -> tuple[torch.Tensor, torch.Tensor]:
+        return (torch.load(btn_path,   map_location=self.map_location, mmap=True),
+                torch.load(mouse_path, map_location=self.map_location, mmap=True))
 
-    def __len__(self): return len(self.df)
-
-    def _to_torch(self, nd: decord.ndarray.NDArray) -> torch.Tensor:
-        # if we are on gpu, no memory transfers
-        if nd.ctx.device_type == self.decode_device.device_type:
-            return torch.utils.dlpack.from_dlpack(nd.to_dlpack())
-        # otherwise, use numpy view
-        return torch.from_numpy(nd.asnumpy())
-
+    def __len__(self): return len(self.datalist)
 
     def __getitem__(self, idx: int) -> dict[str, torch.Tensor | dict]:
-        row       = self.df.iloc[idx]
-        video_rel = row.video
-        start_f   = int(row.start)
+        row                = self.datalist.iloc[idx]
+        start_f, clip_size = int(row.start), int(row.clip_size)
+        frame_idxs: Sequence[int] = range(start_f, start_f + clip_size) # (t,h,w,3) uint8
+
+        video_path, btn_path, mouse_path = self.paths[row.tensor_idx]
+        frames_tchw: torch.Tensor        = self._get_video(video_path)[frame_idxs]
+        btn, mouse                       = self._get_actions(btn_path, mouse_path)
+        # FIXME Sometimes they are not the same length! 
+        btn, mouse                       = btn[frame_idxs], mouse[frame_idxs]
+        act_vec: torch.Tensor            = torch.cat((btn, mouse), dim=1)
         
-        vr = self._get_video(video_rel)
-
-        frame_idxs: Sequence[int] = range(start_f, start_f + self.clip_size) # (t,h,w,3) uint8
-        frames_nd: decord.ndarray.NDArray = vr.get_batch(frame_idxs)
-        frames: torch.Tensor = self._to_torch(frames_nd)
-        frames = frames.permute(0,3,1,2) # (t,h,w,c) -> (t,c,h,w)
-
-        if self.transform: frames = self.transform(frames)
-
-        btn, mouse = self._get_actions(video_rel)
-        target_f   = start_f + self.clip_size - 1
-        act_vec = torch.cat([btn[target_f].float(), mouse[target_f].float()], dim=-1)
-
+        if self.transform:
+            frames_tchw = self.transform(frames_tchw)
+        # TODO Questions 5/15/2025:
+        # - Should we only be reading in frames that have actions?
+        # - Should there be a no-action option in the act_vec?
+        # - - If so, how should that affect the datalist creation?
+        # - There are often multiple actions per frame, not just multiple keys per action. How should we handle this?
+        # - - we end up in a situation where our button and mouse tensors are like [42,6] and [36,2] yet our frames are always [6, ...]
+        # - - so how do what is the action target in this case?
+        # - - And how do we handle the action dimension mismatch?
         return {
-            'obs': frames, # (t,c,h,w)
+            'obs': frames_tchw, # (t,c,h,w)
             'action': act_vec, # (action_dim,), which is like 8 or something
-            'meta': {'video': video_rel, 'start': start_f, 'clip_size': self.clip_size}
+            'meta': {'video': video_path, 'start': start_f, 'clip_size': clip_size}
         }
 
 
@@ -90,8 +64,9 @@ if __name__ == "__main__":
     from torch.utils.data import DataLoader
     from src.constants import ROOT_DIR
     ds = InverseDynamicsDataset(
-        datalist_csv='datalist.csv', root=ROOT_DIR + '/data_dump/games/MCC-Win64-Shipping/', transform=None, decode_device=None
-    )
+        datalist_filepath='./datalist/datalist.csv',
+        tensor_dir=ROOT_DIR, transform=None)
+
     print(ds[0])
 
     dl = DataLoader(ds, batch_size=3, shuffle=True)
