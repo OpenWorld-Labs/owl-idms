@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Sequence, Optional, Callable, Literal
+from typing import Sequence, Callable, Literal
 
 import torch, decord, pandas as pd, json
 from torch.utils.data import Dataset
@@ -52,7 +52,6 @@ class InverseDynamicsDataset(Dataset):
         return self._actions[(self.root / path_rel).parent]
 
     def __len__(self): return len(self.df)
-
 
     def _to_torch(self, nd: decord.ndarray.NDArray) -> torch.Tensor:
         # if we are on gpu, no memory transfers
