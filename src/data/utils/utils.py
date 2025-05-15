@@ -2,7 +2,21 @@ import torch
 import os, pathlib
 import pandas as pd
 from toolz import curry
+from functools import cache
 from src.keybinds import CODE_TO_KEY, KEY_TO_CODE
+
+
+def str_to_dtype(s: str) -> torch.dtype:
+    if s == 'fp8':      return torch.float8_e4m3fn
+    if s == 'fp16':     return torch.float16
+    if s == 'fp32':     return torch.float32
+    if s == 'bfloat16': return torch.bfloat16
+    if s == 'fp64':     return torch.float64
+    raise ValueError(f"Invalid dtype: {s}")
+
+
+@cache
+def warn_once(*args: str): print(f'WARNING: ', *args)
 
 
 def seek_video_dirs(root: str | os.PathLike[str]) -> list[pathlib.Path]:

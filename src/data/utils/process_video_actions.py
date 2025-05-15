@@ -9,8 +9,8 @@ import pandas as pd
 from tqdm import tqdm
 from toolz import pipe
 
-from idm.utils import utils
-from idm.utils.utils import code_from_ascii, seek_video_dirs
+from src.data import utils
+from src.data.utils import code_from_ascii, seek_video_dirs
 from src.constants import FPS, ROOT_DIR, KEYBINDS
 
 
@@ -66,7 +66,7 @@ def _parse_args():
 
 
 def preprocess_videos(root: str | os.PathLike):
-    for vid_dir in tqdm(seek_video_dirs(root), desc="Processing videos"):
+    for vid_dir in tqdm(seek_video_dirs(root), desc="Processing actions from videos"):
         csv_path     = Path(vid_dir) / "inputs.csv"
         mouse_path   = Path(vid_dir) / "mouse_full.pt"
         buttons_path = Path(vid_dir) / "buttons_full.pt"

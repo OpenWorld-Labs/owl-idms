@@ -1,10 +1,10 @@
 from __future__ import annotations
 from pathlib import Path
 import decord, pandas as pd, json
-from src.constants import ROOT_DIR
-from idm.utils.utils import seek_video_dirs
 
-# TODO Get decord working on GPU
+from src.constants import ROOT_DIR
+from src.data.utils import seek_video_dirs
+
 
 def _num_frames(video_path: Path) -> int:
     vr = decord.VideoReader(str(video_path), num_threads=0)
