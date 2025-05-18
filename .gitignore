@@ -1,0 +1,8 @@
+.vscode/
+data_dumps
+checkpoints/
+wandb/
+*.log
+venv/
+ijepa_trainer.py
+**.mp4

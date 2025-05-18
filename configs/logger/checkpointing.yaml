@@ -1,0 +1,4 @@
+checkpoint_frequency: 1
+log_every_step: 25
+eval_every_epoch: 1
+save_final_model: 'final'

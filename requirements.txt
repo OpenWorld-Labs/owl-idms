@@ -1,0 +1,5 @@
+torch
+torchvision
+
+
+git+https://github.com/rbalestr-lab/stable-ssl.git

@@ -1,0 +1,4 @@
+wandb:
+  entity: owl
+  project: owl-idms
+  name: ${hydra:runtime.name}
