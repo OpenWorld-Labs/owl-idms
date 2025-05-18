@@ -4,7 +4,7 @@ import hydra
 import torchvision
 import stable_ssl
 from stable_ssl.trainer import BaseTrainer
-from utils import CosineWDSchedule
+from owl_idms.optim.weight_decay import CosineWDSchedule
 
 
 class InverseDynamicsTrainer(BaseTrainer):
@@ -19,11 +19,11 @@ class InverseDynamicsTrainer(BaseTrainer):
 
     def __init__(self,
                  data, module, hardware, optim, logger, loss, # base
-                 weight_decay: tuple[float, float],
                  **kwargs):
 
         super().__init__(data, module, hardware, optim, logger, loss, **kwargs)
-        self.weight_decay = weight_decay
+        self.weight_decay = optim.pop('weight_decay')
+        
         _tmp_data = hydra.utils.instantiate(self._data, _convert_="object")
         self.ipe = self._calculate_ipe(_tmp_data)
         self.total_steps = self.ipe * self._optim['epochs']

@@ -1,3 +1,13 @@
+import pathlib
+
+FPS = 60
+ROOT_DIR = pathlib.Path(__file__).parent
+
+# Keys to extract from the data
+KEYBINDS = ["W","A","S","D","LMB","RMB"]
+
+ACTION_DIM = len(KEYBINDS) + 2 # +2 for mouse movement
+
 # keycodes aren't nessecarily ascii
 # these were pretty annoying to go through lmao
 

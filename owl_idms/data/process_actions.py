@@ -3,9 +3,9 @@ from __future__ import annotations
 import os, torch, argparse, pandas as pd
 from toolz import pipe
 
-from src.data import utils
-from src.data.utils import code_from_ascii
-from src.constants import FPS, ROOT_DIR, KEYBINDS
+from owl_idms.data import utils
+from owl_idms.data.utils import code_from_ascii
+from owl_idms.constants import FPS, ROOT_DIR, KEYBINDS
 
 
 def to_button_data_tensor(action_data: pd.DataFrame, *,
