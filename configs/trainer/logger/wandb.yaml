@@ -1,4 +1,4 @@
 wandb:
-  entity: owl
+  entity: samibg
   project: owl-idms
   name: ${hydra:runtime.name}

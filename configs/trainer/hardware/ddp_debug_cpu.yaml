@@ -1,0 +1,4 @@
+seed: 0
+float16: true
+device: 'cpu'
+world_size: 2

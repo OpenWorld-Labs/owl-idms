@@ -6,3 +6,4 @@ wandb/
 venv/
 ijepa_trainer.py
 **.mp4
+__pycache__/

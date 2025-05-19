@@ -4,7 +4,7 @@ import pandas as pd
 from toolz import curry
 from functools import cache
 
-from owl_idms.data.keybinds import CODE_TO_KEY, KEY_TO_CODE
+from owl_idms.constants import CODE_TO_KEY, KEY_TO_CODE
 
 
 def str_to_dtype(s: str) -> torch.dtype:

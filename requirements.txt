@@ -1,5 +1,12 @@
 torch
+torchtune
+torchdata
 torchvision
 
-
+# stable-ssl
 git+https://github.com/rbalestr-lab/stable-ssl.git
+
+boto3
+dotenv
+toolz
+diffusers

@@ -2,7 +2,7 @@ import pathlib
 
 FPS = 60
 ROOT_DIR = pathlib.Path(__file__).parent
-
+CHECKPOINT_DIR = "checkpoints/"
 # Keys to extract from the data
 KEYBINDS = ["W","A","S","D","LMB","RMB"]
 

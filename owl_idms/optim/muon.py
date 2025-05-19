@@ -113,7 +113,7 @@ class Muon(torch.optim.Optimizer):
             update_prev()
 
 class CombinedOptimizer(Optimizer):
-    def __init__(self, model, rank=0, world_size=1, **kwargs):
+    def __init__(self, params, rank=0, world_size=1, **kwargs):
         # We need this for the parent Optimizer class
         self.defaults = {}
         
@@ -121,8 +121,13 @@ class CombinedOptimizer(Optimizer):
         if world_size > 1:
             adamw_keys = ['module.' + key for key in adamw_keys]
         
-        adamw_parameters = [p for n, p in model.named_parameters() if any(key in n for key in adamw_keys) or p.ndim < 2]
-        muon_parameters = [p for n, p in model.named_parameters() if not any(key in n for key in adamw_keys) and p.ndim >= 2]
+        adamw_parameters = []
+        muon_parameters = []
+        for name, param in params:
+            if any(key in name for key in adamw_keys) or param.ndim < 2:
+                adamw_parameters.append(param)
+            if not any(key in name for key in adamw_keys) and param.ndim >= 2:
+                muon_parameters.append(param)
 
         # Initialize sub-optimizers
         self.adamw = AdamW(
@@ -136,7 +141,7 @@ class CombinedOptimizer(Optimizer):
         self.muon = Muon(
             muon_parameters,
             lr=kwargs.get('lr'),
-            momentum=kwargs.get('momentum'),
+            momentum=kwargs.get('momentum', 0.95),
             rank = rank,
             world_size = world_size
         )
@@ -168,5 +173,5 @@ class CombinedOptimizer(Optimizer):
         self.adamw.load_state_dict(state_dict['adamw'])
         self.muon.load_state_dict(state_dict['muon'])
 
-def init_muon(model, rank = 0, world_size = 1, **kwargs):
-    return CombinedOptimizer(model, rank, world_size, **kwargs)
+def init_muon(params, rank = 0, world_size = 1, **kwargs):
+    return CombinedOptimizer(params, rank, world_size, **kwargs)

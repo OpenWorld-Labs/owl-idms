@@ -1,6 +1,4 @@
 import math
-import torch
-from typing import Generator
 
 class CosineWDSchedule(object):
     # NOTE from StableSSL

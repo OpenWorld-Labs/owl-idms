@@ -1,4 +1,4 @@
 seed: 0
 float16: true
-device: 'cuda:0'
+device: 'cpu'
 world_size: 1

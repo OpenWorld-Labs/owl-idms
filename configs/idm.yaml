@@ -1,26 +1,41 @@
 defaults:
-  - hardware
-  - logger/checkpointing
-  - logger/wandb
-  - logger/metrics
+  - trainer/hardware/default
+  - trainer/logger/checkpointing
+  - trainer/logger/wandb
+  - trainer/logger/metrics
   - _self_
 
 
 hydra:
   run:
-    dir: ${idm_pretrain_id}
+    dir: ${idm_pretrain_id:${trainer}}
 
 
 trainer:
+  _target_: owl_idms.trainers.idm_trainer.InverseDynamicsTrainer
   module:
-    vae_encoder: ...
-    vae_decoder: ...
-    optical_flow_predictor: ...
-    depth_map_predictor: ...
-    action_predictor: ...
+    vae_encoder: 
+      _target_: owl_idms.modules.vae_debug
+    action_predictor:
+      _target_: owl_idms.modules.idm_vpt_pico
   data:
-    train: ...
-    val: ...
+    train:
+      _target_: owl_idms.data.dummy_dataloader
+      split: train
+    val:
+      _target_: owl_idms.data.dummy_dataloader
+      split: val
   optim:
-    weight_decay: ...    
-  loss: ...
+    optimizer:
+      _target_: owl_idms.optim.muon
+      _partial_: True
+      lr: 0.0003
+      adamw_lr: 0.0001
+      momentum: 0.95
+    scheduler:
+      _target_: stable_ssl.schedulers.LinearWarmupCosineAnnealing
+      _partial_: True
+    weight_decay: [0.01, 0.001]
+  loss:
+    _target_: owl_idms.modules.idm_loss
+    mouse_weight: 0.3

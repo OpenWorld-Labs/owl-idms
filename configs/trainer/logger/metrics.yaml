@@ -1,4 +1,4 @@
 metric:
-  test:
+  val:
     mse:
       _target_: torchmetrics.regression.MeanSquaredError
