@@ -34,7 +34,7 @@ class BaseTrainer(torch.nn.Module):
                  val_dataloader: DataLoader,
                  modules: dict[str, Module],
                  loss: Module,
-                 hardware: HardwareConfig,
+                 hardware_config: HardwareConfig,
                  optim_config: OptimizationConfig,
                  logging_config: LoggingConfig):
 
@@ -58,10 +58,10 @@ class BaseTrainer(torch.nn.Module):
         self.current_epoch  = self.register_buffer("current_epoch", torch.zeros(1, dtype=torch.int64), persistent=True)
         self.weight_decay   = optim_config['weight_decay']
         # -- hardware
-        self.device         = hardware['device']
-        self.world_size     = hardware['world_size']
-        self.local_rank     = hardware['local_rank']
-        self.global_rank    = hardware['global_rank']
+        self.device         = hardware_config['device']
+        self.world_size     = hardware_config['world_size']
+        self.local_rank     = hardware_config['local_rank']
+        self.global_rank    = hardware_config['global_rank']
         # -- logging
         self.save_epoch_frequency = logging_config['save_epoch_frequency']
         self.log_step_frequency   = logging_config['log_step_frequency']

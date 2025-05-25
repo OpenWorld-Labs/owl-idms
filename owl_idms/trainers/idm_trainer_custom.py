@@ -7,7 +7,7 @@ from torch.utils.data import DataLoader
 
 
 class IDMTrainer(BaseTrainer):
-    def __init__(self,  # TPDP 05/25/2025: Fix configs.yaml to use this trainer
+    def __init__(self,  # TODO 05/25/2025: Fix configs.yaml to use this trainer
                  train_dataloader: DataLoader,
                  val_dataloader: DataLoader,
                  modules: dict[str, Module],
