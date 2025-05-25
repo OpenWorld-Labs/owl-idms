@@ -4,12 +4,14 @@ import io
 import tarfile
 from toolz import curry
 from pathlib import Path
-from typing import TypeVar
+from typing import TypeVar, Iterator
 
 import torch
 from torch import Tensor
 from collections.abc import Sized
 from torch.utils.data import SequentialSampler
+import itertools
+
 from torchdata.nodes import (
     SamplerWrapper,
     ParallelMapper,
@@ -17,10 +19,11 @@ from torchdata.nodes import (
     Batcher,
     Loader,
     BaseNode,
+    IterableWrapper
 )
-from torchdata.stateful_dataloader import StatefulDataLoader
 
 from owl_idms.data.tigris import get_filesystem, glob_shards
+from owl_idms.distributed import get_rank, get_world_size
 
 T = TypeVar("T")
 
@@ -74,36 +77,17 @@ def make_tensor_video_loader(
     batch_size: int = 8,
     num_workers: int = 8,
     drop_last: bool = False,
-) -> StatefulDataLoader:
+) -> Iterator[tuple[Tensor, Tensor, Tensor]]:
     """Return a Loader streaming (video, button, mouse) tensors from shards."""
-    node = SamplerWrapper(shard_urls)
-    node = ParallelMapper(node, map_fn=_process_tar(fs=fs), num_workers=num_workers, method="thread")
-    node = Unbatcher(node)
+    # NOTE Assume shards are shuffled
+    # NOTE Napkin math - we have 10k hrs of data, tar contains 5k frames --> at 24fps: (10k*3600*24) / (5k) = 170k tars
+    urls = itertools.islice(shard_urls, get_rank(), None, get_world_size()) # rank=1 world_size=4, yields 1, 5, 9, 13
+    node = IterableWrapper(urls)
+    # _process_tar yields (video, button, mouse) tuples
+    node = ParallelMapper(node, map_fn=_process_tar(fs=fs), num_workers=num_workers, method="process")
     node = Batcher(node, batch_size=batch_size, drop_last=drop_last)
-    return Loader(node, restart_on_stop_iteration=False)  # TODO should be True or False? False cause we  iterate over entire dataset per epoch and not over fixed number of batches
-    return StatefulDataLoader(node, restart_on_stop_iteration=False)  # TODO should be True or False? False cause we  iterate over entire dataset per epoch and not over fixed number of batches
-
-class SequentialSamplerWrapper(SequentialSampler):
-    def __init__(self, data_source: Sized, size: int,):
-        super().__init__(data_source)
-        self.size = size
-
-    def __len__(self):
-        # NOTE This is not actually used but is just there for compatibility with the base class and DDP
-        # in stable-ssl. Our actual sampler is iterable, not indexable.
-        return self.size
-
-
-class SequentialSamplerAdapter(Loader):
-    def __init__(
-        self,
-        root: BaseNode[T],
-        restart_on_stop_iteration: bool = True,
-        size: int = 1e6, # NOTE This is not actually used but is just there for compatibility with the stable-ssl base class and DDP
-    ):
-        """This class just adds a sampler to the loader so that it will be wrapped by stable-ssl's init."""
-        super().__init__(root, restart_on_stop_iteration)
-        self.sampler = SequentialSampler(range(size))
+    node = Loader(node, restart_on_stop_iteration=True)
+    return node
 
 
 def init_dataloaders(
@@ -125,7 +109,7 @@ def init_dataloaders(
         batch_size=batch_size,
         num_workers=num_workers,
     )
-    return SequentialSamplerAdapter(loader)
+    return loader
 
 # NOTE Initially I opted to use torchdata because of the lower overhead of batching and the fact that it's more idiomatic for loading from blobstores.
 # However it does not play as nice with stable-ssl, because stable-ssl assumes usage of torch.utils.data. 
