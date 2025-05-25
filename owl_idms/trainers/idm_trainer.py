@@ -65,6 +65,7 @@ class InverseDynamicsTrainer(BaseTrainer):
         self.wd_scheduler.step()
         self._log({'train/wd': self.wd_scheduler[-1]}, commit=False)
 
+
     @override
     def _set_device(self, hardware):
         import logging, os

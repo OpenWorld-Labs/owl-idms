@@ -10,3 +10,6 @@ boto3
 dotenv
 toolz
 diffusers
+
+# pytorch-lightning
+lightning

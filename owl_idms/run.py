@@ -2,6 +2,7 @@ import os
 import hydra
 from omegaconf import DictConfig
 from owl_idms import resolvers  # noqa
+import pytorch_lightning as pl
 
 @hydra.main(config_path='../configs', config_name='idm.yaml', version_base=None)
 def main(cfg: DictConfig):
@@ -16,7 +17,7 @@ def main(cfg: DictConfig):
         # Enable DDP debugging
         cfg.trainer.ddp_debug = True
     
-# Instantiate and run the trainer
+    # Instantiate and run the trainer
     trainer = hydra.utils.instantiate(cfg.trainer, _convert_="object", _recursive_=False)
     trainer()
 

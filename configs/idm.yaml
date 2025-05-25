@@ -10,6 +10,17 @@ hydra:
   run:
     dir: ${idm_pretrain_id:${trainer}}
 
+data:
+  _target_: owl_idms.data.dummy_dataloader
+  split: train
+
+vae_encoder:
+  _target_: owl_idms.modules.vae_debug
+
+action_predictor:
+  _target_: owl_idms.modules.idm_vpt_pico
+
+
 
 trainer:
   _target_: owl_idms.trainers.idm_trainer.InverseDynamicsTrainer
