@@ -1,28 +1,27 @@
-hydra:
-  run:
-    dir: ${idm_pretrain_id:${trainer}}
-
 optim:
-  epochs: 10
-  batch_size: 128
+  epochs: 12
   accumulation_steps: 1
   grad_max_norm: 1.0
+  iterations_per_epoch: 10_000
   optimizer:
     _target_: owl_idms.optim.muon
-    _partial_: True
-    lr: 0.0003
-  weight_decay: [0.01, 0.001]
+    _partial_: true
+    lr : 7.5e-4
+    momentum: 0.95
+    adamw_lr :  7.5e-5
+    adamw_eps: 1.0e-15
+    adamw_betas: [0.9, 0.999]
 
 logging:
   save_epoch_frequency: 1
-  log_step_frequency: 100
-  save_path: ./checkpoints
+  log_step_frequency: 25
+  eval_every_n_epochs: 1
 
 hardware:
   device: cuda
   world_size: 1
-  local_rank: 0
-  global_rank: 0
+  local_rank: null # set at runtime
+  global_rank: null # set at runtime
 
 loss:
   _target_: owl_idms.modules.idm_loss
@@ -32,15 +31,20 @@ loss:
   reduction: mean
 
 train_dataloader:
-  _target_: owl_idms.data.dummy_dataloader
+  _target_: owl_idms.data.get_cod_loader
   split: train
-
+  batch_size: 64
+  num_workers: 24
 val_dataloader:
-  _target_: owl_idms.data.dummy_dataloader
+  _target_: owl_idms.data.get_cod_loader
   split: val
+  batch_size: 64
+  num_workers: 24
 
 modules:
   vae_encoder:
-    _target_: owl_idms.modules.vae_debug
+    _target_: owl_idms.modules.vae_sd
+    requires_grad: false
   action_predictor:
-    _target_: owl_idms.modules.idm_vpt_pico
+    _target_: owl_idms.modules.idm_vpt_base
+    n_frames: 32

@@ -4,7 +4,11 @@ FPS = 60
 ROOT_DIR = pathlib.Path(__file__).parent
 CHECKPOINT_DIR = "checkpoints/"
 # Keys to extract from the data
-KEYBINDS = ["W","A","S","D","LMB","RMB"]
+# KEYBINDS = ["W","A","S","D","LSHIFT","SPACE","LCTRL","F","R","E","LMB","RMB"]
+KEYBINDS = ["W","A","S","D","LSHIFT","SPACE","LCTRL","F","R","LMB","RMB"] # Removed E for now - idk why it has 12 keys not 11.
+
+WANDB_ENTITY = 'samibg'
+WANDB_PROJECT = 'owl-idms'
 
 ACTION_DIM = len(KEYBINDS) + 2 # +2 for mouse movement
 

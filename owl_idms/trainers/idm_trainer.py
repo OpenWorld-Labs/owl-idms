@@ -6,7 +6,7 @@ from stable_ssl.base import BaseTrainer
 
 from owl_idms.optim.weight_decay import CosineWDSchedule
 from owl_idms.modules.idm_loss import IDMLoss
-from owl_idms.types import ActionPrediction, ActionGroundTruth
+from owl_idms._types import ActionPrediction, ActionGroundTruth
 from owl_idms.modules.vpt import LatentVPTInverseDynamics
 
 

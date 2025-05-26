@@ -1,7 +1,10 @@
+--extra-index-url https://download.pytorch.org/whl/cu128
 torch
 torchtune
 torchdata
 torchvision
+einops
+kornia
 
 # stable-ssl
 git+https://github.com/rbalestr-lab/stable-ssl.git

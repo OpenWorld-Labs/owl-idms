@@ -3,21 +3,15 @@ import torch
 from torch import nn
 from diffusers.models.autoencoders.autoencoder_tiny import AutoencoderTiny
 
-def get_vae(vae_id: str, mode: str = "encoder"):
+def get_vae(vae_id: str, mode: str = "encoder", do_compile: bool = True, requires_grad: bool = True):
     """
     Get a specific autoencoder then get either its encoder or decoder
     """
-    if vae_id == "sd":
-        return VAE("madebyollin/taesd", mode)
-    if vae_id == "sdxl":
-        return VAE("madebyollin/taesdxl", mode)
-    if vae_id == "flux":
-        return VAE("madebyollin/taef1", mode)
-    raise ValueError(f"Unknown VAE ID: {vae_id}")
+    return VAE(vae_id, mode=mode, do_compile=do_compile, requires_grad=requires_grad)
 
 
 class VAE(nn.Module):
-    def __init__(self, model_id, mode="encoder", do_compile=True):
+    def __init__(self, model_id, mode="encoder", do_compile=True, requires_grad=True):
         super().__init__()
 
         vae = AutoencoderTiny.from_pretrained(model_id, torch_dtype=torch.bfloat16)
@@ -31,6 +25,9 @@ class VAE(nn.Module):
 
         if do_compile:
             self.model = torch.compile(self.model)
+
+        for p in self.model.parameters():
+            p.requires_grad = requires_grad
 
     def forward(self, x):
         with torch.no_grad(), torch.amp.autocast("cuda", dtype=torch.bfloat16):
@@ -48,11 +45,17 @@ class IdentityModule(nn.Module):
 def vae_debug():
     return IdentityModule()
 
-def sd():
-    return get_vae("madebyollin/taesd", "encoder")
+def sd(do_compile: bool = True, requires_grad: bool = True):
+    return get_vae("madebyollin/taesd", "encoder", do_compile, requires_grad)
 
-def sdxl():
-    return get_vae("madebyollin/taesdxl", "encoder")
+def sdxl(do_compile: bool = True, requires_grad: bool = True):
+    return get_vae("madebyollin/taesdxl", "encoder", do_compile, requires_grad)
 
-def flux():
-    return get_vae("madebyollin/taef1", "encoder")
+def flux(do_compile: bool = True, requires_grad: bool = True):
+    return get_vae("madebyollin/taef1", "encoder", do_compile, requires_grad)
+
+
+if __name__ == "__main__":
+    vae = sd()
+    x = torch.randn(1, 3, 256, 256)
+    print(vae(x).shape)

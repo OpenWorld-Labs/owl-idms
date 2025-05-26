@@ -2,7 +2,7 @@ import torch
 from torch import nn
 
 from owl_idms.modules.utils import PositionalEncoding
-from owl_idms.types import ActionPrediction
+from owl_idms._types import ActionPrediction
 from owl_idms.constants import KEYBINDS
 
 class LatentVPTInverseDynamics(nn.Module):
@@ -25,6 +25,7 @@ class LatentVPTInverseDynamics(nn.Module):
         self,
         zin: int,
         n_keys: int,
+        n_frames: int,
         embed_dim: int = 512,
         n_layers: int = 6, n_heads: int = 8,
         ff_dim: int = 2048, dropout: float = 0.1,
@@ -47,9 +48,9 @@ class LatentVPTInverseDynamics(nn.Module):
         self.encoder = nn.TransformerEncoder(enc_layer, num_layers=n_layers)
         self.final_ln = nn.LayerNorm(embed_dim)
 
-        self.key_head = nn.Linear(embed_dim, n_keys)
-        self.mouse_mu_head = nn.Linear(embed_dim, 2)
-        self.mouse_logsigma_head = nn.Linear(embed_dim, 2)
+        self.key_head = nn.Linear(embed_dim, n_keys * n_frames)
+        self.mouse_mu_head = nn.Linear(embed_dim, 2 * n_frames)
+        self.mouse_logsigma_head = nn.Linear(embed_dim, 2 * n_frames)
 
         self._init_weights()
 
@@ -76,15 +77,17 @@ class LatentVPTInverseDynamics(nn.Module):
         pooled = self.final_ln(x[:, 0])
 
         return ActionPrediction(
-            buttons=self.key_head(pooled),
-            mouse_mu=self.mouse_mu_head(pooled),
-            mouse_log_sigma=self.mouse_logsigma_head(pooled),
+            buttons=self.key_head(pooled).reshape(b, t, -1), # [B, T, n_keys]
+            mouse_mu=self.mouse_mu_head(pooled).reshape(b, t, -1), # [B, T, 2]
+            mouse_log_sigma=self.mouse_logsigma_head(pooled).reshape(b, t, -1), # [B, T, 2]
         )
 
 
-def vpt_pico(zin: int = 32, n_keys: int = len(KEYBINDS), **kwargs):
-    return LatentVPTInverseDynamics(zin, n_keys, **kwargs)
+def vpt_pico(zin: int = 32, n_keys: int = len(KEYBINDS), n_frames: int = 1, **kwargs):
+    return LatentVPTInverseDynamics(zin, n_keys, n_frames, **kwargs)
 
 
-def vpt_base(zin: int = 4096, n_keys: int = len(KEYBINDS), **kwargs):
-    return LatentVPTInverseDynamics(zin, n_keys, **kwargs)
+
+# def vpt_base(zin: int = 4096, n_keys: int = len(KEYBINDS), **kwargs):
+def vpt_base(zin: int = 256, n_keys: int = len(KEYBINDS), n_frames: int = 1, **kwargs):
+    return LatentVPTInverseDynamics(zin, n_keys, n_frames, **kwargs)

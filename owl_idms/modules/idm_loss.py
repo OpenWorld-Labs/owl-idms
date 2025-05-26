@@ -1,7 +1,7 @@
 from torch import Tensor
 import torch.nn as nn
 
-from owl_idms.types import ActionGroundTruth, ActionPrediction
+from owl_idms._types import ActionGroundTruth, ActionPrediction
 
 
 class IDMLoss(nn.Module):

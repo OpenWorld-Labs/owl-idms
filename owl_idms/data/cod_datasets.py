@@ -1,98 +1,106 @@
-from torch.utils.data import DataLoader, IterableDataset
-import torch
-import torch.nn.functional as F
+from __future__ import annotations
+import os, random
+from functools import cache
+from typing import Callable, Literal, Sequence
 
-import os
-import random
+import torch
+from torch.utils.data import DataLoader, IterableDataset
+import kornia.augmentation as K
+
+
+DEFAULT_TRANSFORM = K.VideoSequential(                # lives on GPU
+    K.RandomAffine(degrees=0.0,
+                   translate=0.05,
+                   scale=(0.9, 1.1),
+                   p=1.0),
+    K.ColorJitter(brightness=0.1,
+                  contrast=0.1,
+                  saturation=0.1,
+                  hue=0.0,
+                  p=1.0),
+    K.RandomGaussianNoise(mean=0.0, std=0.02, p=1.0),
+    data_format="BTCHW",        # (B,T,C,H,W)
+    same_on_frame=True,        # ➀ same params for all frames in a clip
+)
+
+
+@cache
+def get_cod_paths(root: str = "/home/shared/cod_data/") -> list[tuple[str, str, str]]:
+    paths: list[tuple[str, str, str]] = []
+    for root_dir in os.listdir(root):
+        splits_dir = os.path.join(root, root_dir, "splits")
+        if not os.path.isdir(splits_dir):
+            continue
+        for name in os.listdir(splits_dir):
+            if "_mouse" in name or "_buttons" in name:
+                continue
+            stem = os.path.splitext(name)[0]
+            v = os.path.join(splits_dir, name)
+            m = os.path.join(splits_dir, f"{stem}_mouse.pt")
+            b = os.path.join(splits_dir, f"{stem}_buttons.pt")
+            if os.path.exists(m) and os.path.exists(b):
+                paths.append((v, m, b))
+    return paths
+
 
 class CoDDataset(IterableDataset):
-    def __init__(self, window_length = 32, root = "/home/shahbuland/cod_data/raw"):
+    def __init__(
+        self,
+        window_length: int = 32,
+        root: str = "/home/shared/cod_data/",
+        split: Literal["train", "val"] = "train",
+        transform: Callable[[torch.Tensor], torch.Tensor] | None = None,
+    ):
         super().__init__()
-
         self.window = window_length
-        self.paths = []
-        for root_dir in os.listdir(root):
-            splits_dir = os.path.join(root, root_dir, "splits")
-            if not os.path.isdir(splits_dir):
-                continue
-                
-            # Get all files in splits dir
-            files = os.listdir(splits_dir)
-            # Filter to just the base files (without _mouse or _buttons)
-            base_files = [f for f in files if not ("_mouse" in f or "_buttons" in f)]
-            
-            for base_file in base_files:
-                base_path = os.path.join(splits_dir, base_file)
-                base_name = os.path.splitext(base_file)[0]
-                mouse_path = os.path.join(splits_dir, f"{base_name}_mouse.pt") 
-                buttons_path = os.path.join(splits_dir, f"{base_name}_buttons.pt")
-                
-                if os.path.exists(mouse_path) and os.path.exists(buttons_path):
-                    self.paths.append((base_path, mouse_path, buttons_path))
-    
-    def get_item(self):
-        vid_path, mouse_path, btn_path = random.choice(self.paths)
-        # Load tensors with memory mapping
-        vid = torch.load(vid_path, map_location='cpu', mmap=True)
-        mouse = torch.load(mouse_path, map_location='cpu', mmap=True) 
-        buttons = torch.load(btn_path, map_location='cpu', mmap=True)
+        paths = get_cod_paths(root)
+        cut = int(len(paths) * 0.75)
+        self.paths = paths[:cut] if split == "train" else paths[cut:]
+        self.transform = transform
 
-        # Get minimum length
-        min_len = min(len(vid), len(mouse), len(buttons))
+    # ------------------------------------------------------------------
+    def _random_clip(self):
+        v_path, m_path, b_path = random.choice(self.paths)
+        vid = torch.load(v_path, map_location="cpu", mmap=True)     # [N,C,H,W]
+        mouse = torch.load(m_path, map_location="cpu", mmap=True)
+        buttons = torch.load(b_path, map_location="cpu", mmap=True)
 
-        # Get random starting point that allows for full window
-        max_start = min_len - self.window
-        window_start = random.randint(0, max_start)
-        
-        # Extract window slices
-        vid_slice = vid[window_start:window_start+self.window]
-        mouse_slice = mouse[window_start:window_start+self.window]
-        buttons_slice = buttons[window_start:window_start+self.window]
+        s = random.randint(0, min(len(vid), len(mouse), len(buttons)) - self.window)
+        vid = vid[s : s + self.window].float()                      # [-1,1]
+        vid = (vid + 1.0) * 0.5                                     # → [0,1]
 
-        return vid_slice, mouse_slice, buttons_slice # [n,c,h,w] [n,2], [n,n_buttons] respectively
+        if self.transform is not None:
+            vid = self.transform(vid)
+
+        return vid.to(torch.bfloat16), mouse[s : s + self.window], buttons[s : s + self.window]
 
     def __iter__(self):
         while True:
-            yield self.get_item()
+            yield self._random_clip()
 
-def collate_fn(x):
-    # x is list of triples
-    vids, mouses, buttons = zip(*x)
-    vids = torch.stack(vids)      # [b,n,c,h,w]
-    mouses = torch.stack(mouses)  # [b,n,2]
-    buttons = torch.stack(buttons) # [b,n,n_buttons]
-    return vids, mouses, buttons
 
-def get_loader(batch_size, **dataloader_kwargs):
-    """
-    Creates a DataLoader for the CoDDataset with the specified batch size
-    
-    Args:
-        batch_size: Number of samples per batch
-        **dataloader_kwargs: Additional arguments to pass to DataLoader
-        
-    Returns:
-        DataLoader instance
-    """
-    dataset = CoDDataset()
-    loader = torch.utils.data.DataLoader(
-        dataset,
+def collate_fn(batch: Sequence):
+    v, m, b = zip(*batch)
+    return torch.stack(v), torch.stack(m), torch.stack(b)
+
+
+def get_loader(batch_size: int, split: Literal["train", "val"] = "train", **dl_kwargs):
+    return DataLoader(
+        CoDDataset(split=split),
         batch_size=batch_size,
+        pin_memory=True,
         collate_fn=collate_fn,
-        **dataloader_kwargs
+        # prefetch_factor=12,
+        **dl_kwargs,
     )
-    return loader
 
+
+# quick smoke-test -----------------------------------------------------------
 if __name__ == "__main__":
-    import time
-    loader = get_loader(32)
+    import time, torch.backends.cuda
+    torch.backends.cuda.matmul.allow_tf32 = True
 
-    start = time.time()
-    batch = next(iter(loader))
-    end = time.time()
-    
-    x,y,z = batch
-    print(f"Time to load batch: {end-start:.2f}s")
-    print(f"Video shape: {x.shape}")
-    print(f"Mouse shape: {y.shape}") 
-    print(f"Button shape: {z.shape}")
+    loader = get_loader(32, split="val")
+    t0 = time.time()
+    vids, mouse, buttons = next(iter(loader))
+    print(f"{time.time() - t0:.3f}s  →", vids.shape, mouse.shape, buttons.shape)

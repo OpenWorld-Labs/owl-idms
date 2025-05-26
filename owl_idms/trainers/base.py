@@ -1,13 +1,18 @@
 import torch
 from pathlib import Path
 from typing import TypedDict
+from abc import abstractmethod
 
 from tqdm import tqdm
 from torch.nn import Module
 from torch.optim import Optimizer
 from torch.utils.data import DataLoader
-
 import wandb
+import time
+import functools
+from hydra.core.hydra_config import HydraConfig
+
+from owl_idms.constants import WANDB_ENTITY, WANDB_PROJECT
 
 class HardwareConfig(TypedDict):
     device: torch.device
@@ -21,7 +26,7 @@ class OptimizationConfig(TypedDict):
     batch_size: int
     accumulation_steps: int
     optimizer: Optimizer
-    weight_decay: tuple[float, float]
+    iterations_per_epoch: int
 
 class LoggingConfig(TypedDict):
     save_epoch_frequency: int
@@ -29,6 +34,9 @@ class LoggingConfig(TypedDict):
     save_path: Path = Path("./checkpoints")
 
 class BaseTrainer(torch.nn.Module):
+
+    PORT = 29500
+
     def __init__(self,
                  train_dataloader: DataLoader,
                  val_dataloader: DataLoader,
@@ -36,10 +44,12 @@ class BaseTrainer(torch.nn.Module):
                  loss: Module,
                  hardware_config: HardwareConfig,
                  optim_config: OptimizationConfig,
-                 logging_config: LoggingConfig):
+                 logging_config: LoggingConfig,
+                 transform: Module | None = None):
 
         super().__init__()
         self.epochs = optim_config['epochs']
+        self.iterations_per_epoch = optim_config['iterations_per_epoch']
         # -- model
         self._modules = modules
         # -- dataloaders
@@ -51,12 +61,11 @@ class BaseTrainer(torch.nn.Module):
         self.optimizer: Optimizer = optim_config['optimizer']
         self.scaler = torch.amp.GradScaler("cuda", enabled=True)
         self.grad_max_norm = optim_config['grad_max_norm']
-        self.batch_size = optim_config['batch_size']
+        self.batch_size = train_dataloader.batch_size
         self.accumulation_steps = optim_config['accumulation_steps']
         self.batch_idx      = 0
-        self.global_idx     = self.register_buffer("global_idx", torch.zeros(1, dtype=torch.int64), persistent=True)
-        self.current_epoch  = self.register_buffer("current_epoch", torch.zeros(1, dtype=torch.int64), persistent=True)
-        self.weight_decay   = optim_config['weight_decay']
+        self.register_buffer("global_idx", torch.zeros(1, dtype=torch.int64), persistent=True)
+        self.register_buffer("current_epoch", torch.zeros(1, dtype=torch.int64), persistent=True)
         # -- hardware
         self.device         = hardware_config['device']
         self.world_size     = hardware_config['world_size']
@@ -65,45 +74,96 @@ class BaseTrainer(torch.nn.Module):
         # -- logging
         self.save_epoch_frequency = logging_config['save_epoch_frequency']
         self.log_step_frequency   = logging_config['log_step_frequency']
-        self.save_path            = logging_config['save_path']
+        self.save_path            = Path(HydraConfig.get().runtime.output_dir)
+        self.eval_every_n_epochs  = logging_config['eval_every_n_epochs']
         self.log_buffer           = {}
+        # -- after all attributes are set we can start setting up ddp and devices
+        self.setup_hardware()
+        self.setup_optimizer()
+        self.setup_logging()
+        self.transform: Module = transform.to(self.device)
+        print(f'Number of trainable parameters: {sum(p.numel() for p in self.trainable_parameters()):,}')
+        print(f'Number of untrainable parameters: {sum(p.numel() for p in self.parameters() if not p.requires_grad):,}')
+        print(f'Number of total parameters: {sum(p.numel() for p in self.parameters()):,}')
 
-    def train(self):
+    def setup_hardware(self):
+        if not torch.cuda.is_available() or self.device == "cpu":
+            self.device = "cpu"
+            return
+        
+        if self.world_size > 1:
+            dist_url = f'tcp://localhost:{self.PORT}'
+            print(f"Initializing DDP training with world_size={self.world_size} and dist_url={dist_url}")
+            torch.distributed.init_process_group('nccl', init_method=dist_url, rank=self.global_rank, world_size=self.world_size)
+
+        self.device = torch.device(f'cuda:{self.local_rank}')
+
+    def setup_optimizer(self):
+        if isinstance(self.optimizer, functools.partial):
+            self.optimizer = self.optimizer(self.trainable_named_parameters(), rank=self.global_rank, world_size=self.world_size)
+
+    def setup_logging(self):
+        wandb.init(entity=WANDB_ENTITY, project=WANDB_PROJECT)
+        self.save_path.mkdir(parents=True, exist_ok=True)
+
+    def trainable_named_parameters(self):
+        yield from ((n,p) for n,p in self.named_parameters() if p.requires_grad)
+    def trainable_parameters(self):
+        yield from (p for n,p in self.named_parameters() if p.requires_grad)
+
+    def __call__(self):
+        return self.train_()
+
+    @abstractmethod
+    def forward(self):
+        pass
+
+    def train_(self):
         self.before_train()
         with torch.amp.autocast(device_type=self.device.type, dtype=torch.bfloat16):
             for epoch in range(self.epochs):
-                self.current_epoch = epoch
+                print(f'Training epoch {epoch} of {self.epochs}, started at {time.time()}')
+                self.current_epoch = torch.tensor(epoch, device=self.device)
                 self.before_epoch()
                 self.train_epoch()
+                if epoch % self.eval_every_n_epochs == 0:
+                    self.eval_epoch()
                 self.after_epoch()
 
         self.after_train()
 
     def train_epoch(self):
-        for idx, batch in enumerate(tqdm(self.train_dataloader, total=len(self.train_dataloader), desc=f"Training: {self.current_epoch}")):
+        self.train() # set to train mode
+        for idx, batch in enumerate(tqdm(self.train_dataloader,
+                                        total=self.iterations_per_epoch,
+                                        desc=f"Training: {self.current_epoch}")):
             self.batch_idx = idx
             self.before_step(batch)
             self.train_step(batch)
             self.after_step(batch)
+            if idx + 1 == self.iterations_per_epoch:
+                break
 
     def train_step(self, batch: dict):
         loss = self.forward_step(batch)
+        print(f'Loss: {loss.item():.4f}')
         self.scaler.scale(loss).backward()
 
         if (self.batch_idx + 1) % self.accumulation_steps == 0:
             self.scaler.unscale_(self.optimizer)
             if self.grad_max_norm is not None:
-                torch.nn.utils.clip_grad_norm_(self.parameters(), self.grad_max_norm)
+                torch.nn.utils.clip_grad_norm_(self.trainable_parameters(), self.grad_max_norm)
             self.scaler.step(self.optimizer)
             self.scaler.update()
             self.optimizer.zero_grad(set_to_none=True)
 
-        if self.global_idx % self.log_step_frequency == 0:
-            self.log(batch, flush=True)
+        if self.global_idx.item() % self.log_step_frequency == 0:
+            self.log(None, flush=True)
 
     def log(self, batch: dict | None = None, flush: bool = False):
+        self.log_buffer.update(batch or {})
+
         if not flush:
-            self.log_buffer.update(batch or {})
             return
         
         wandb.log(self.log_buffer, step=self.global_idx.item())
@@ -127,13 +187,42 @@ class BaseTrainer(torch.nn.Module):
         pass
 
     def before_train(self):
-        pass
+        for module in self._modules.values():
+            module.to(self.device)
     
     def before_epoch(self):
         pass
     
     def save_checkpoint(self, path: Path):
+        print(f'Saving checkpoint at epoch {self.current_epoch} to {path}')
         torch.save(self.state_dict(), path)
 
     def load_checkpoint(self, path: Path):
         self.load_state_dict(torch.load(path))
+
+    # ---- evaluation
+    def eval_epoch(self):
+        self.eval()
+        for idx, batch in enumerate(tqdm(self.val_dataloader,
+                                        total=self.iterations_per_epoch,
+                                        desc=f"Evaluating: {self.current_epoch}")):
+            self.batch_idx = idx
+            self.before_step(batch)
+            self.eval_step(batch)
+            self.after_step(batch)
+            if idx + 1 == self.iterations_per_epoch:
+                break
+
+    def eval_step(self, batch: dict):
+        with torch.no_grad():
+            loss = self.forward_step(batch)
+            print(f'Eval loss: {loss.item():.4f}')
+            if self.global_idx.item() % self.log_step_frequency == 0:
+                self.log(None, flush=True)
+
+
+
+    def after_eval(self):
+        pass
+    
+    
