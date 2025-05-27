@@ -19,3 +19,6 @@ lightning
 opencv-python
 wandb
 wandb[media]
+
+matplotlib
+seaborn

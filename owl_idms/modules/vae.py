@@ -42,7 +42,7 @@ class IdentityModule(nn.Module):
 
 
 # for giggles for now
-def vae_debug():
+def no_vae(*args, **kwargs):
     return IdentityModule()
 
 def sd(do_compile: bool = True, requires_grad: bool = True):

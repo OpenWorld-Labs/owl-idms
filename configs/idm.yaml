@@ -36,7 +36,7 @@ loss:
 train_dataloader:
   _target_: owl_idms.data.get_cod_loader
   split: train
-  batch_size: 117
+  batch_size: 64
   num_workers:  24
 val_dataloader:
   _target_: owl_idms.data.get_cod_loader
@@ -45,9 +45,6 @@ val_dataloader:
   num_workers: 24
 
 modules:
-  vae_encoder:
-    _target_: owl_idms.modules.vae_sd
-    requires_grad: false
   action_predictor:
-    _target_: owl_idms.modules.idm_vpt_base
+    _target_: owl_idms.modules.basic_idm_base
     n_frames: 32

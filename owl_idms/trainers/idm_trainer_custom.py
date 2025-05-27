@@ -30,12 +30,7 @@ class IDMTrainer(BaseTrainer):
         super().__init__(train_dataloader, val_dataloader, modules, loss, hardware, optim_config, logging_config, gpu_transform)
 
     def _compute_loss(self, video, buttons, mouse):
-        videos_as_frames = video.view(-1, *video.shape[2:])
-        latent = self._modules['vae_encoder'](videos_as_frames)
-        # TODO fix this ugly shit
-        latent_as_videos = latent.view(video.shape[0], video.shape[1], latent.shape[1], latent.shape[2], latent.shape[3])
-        flattened_latent = latent_as_videos.view(latent_as_videos.shape[0], latent_as_videos.shape[1], latent_as_videos.shape[2], -1)
-        pred: ActionPrediction = self._modules['action_predictor'](flattened_latent)
+        pred: ActionPrediction = self._modules['action_predictor'](video)
         gt = ActionGroundTruth(buttons=buttons, mouse=mouse)        
         kp_loss, mouse_loss = self.loss(pred, gt)
         return {

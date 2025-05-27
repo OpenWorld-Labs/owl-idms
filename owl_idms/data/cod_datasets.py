@@ -59,6 +59,41 @@ def get_cod_paths(root: str = "/home/shared/cod_data/") -> list[tuple[str, str, 
                 paths.append((v, m, b))
     return paths
 
+MOUSE_STATS = {
+  "clip_mag": 10.883796691894531,
+  "median": 0.8615849614143372,
+  "iqr": 1.0,
+  "x_mean": 0.009292899630963802,
+  "x_std": 1.8915449380874634
+}
+_CLIP = MOUSE_STATS["clip_mag"]
+_MED  = MOUSE_STATS["median"]
+_IQR  = MOUSE_STATS["iqr"] + 1e-6     # avoid /0
+
+def normalise_mouse(dx_dy: torch.Tensor) -> torch.Tensor:
+    """
+    Args
+    ----
+    dx_dy : Tensor[2] – raw integer deltas
+    Returns
+    -------
+    Tensor[2] – clipped-log-robust-scaled deltas in roughly [-2, 2]
+    """
+    # 1) clip by magnitude (vectorially, not per-component)
+    mag   = dx_dy.norm()
+    if mag > _CLIP:
+        dx_dy = dx_dy * (_CLIP / mag)
+
+    # 2) log-compress component-wise (keeps sign)
+    dx_dy = torch.sign(dx_dy) * torch.log1p(dx_dy.abs())
+
+    # 3) robust scale with global median/IQR **per component** or on |Δ|
+    dx_dy = (dx_dy - _MED) / _IQR
+
+    # 4) optional squash to [-1,1] to match tanh in the network head
+    dx_dy = torch.tanh(dx_dy)
+
+    return dx_dy
 
 class CoDDataset(IterableDataset):
     def __init__(
@@ -85,11 +120,18 @@ class CoDDataset(IterableDataset):
         s = random.randint(0, min(len(vid), len(mouse), len(buttons)) - self.window)
         vid = vid[s : s + self.window].float()                      # [-1,1]
         vid = (vid + 1.0) * 0.5                                     # → [0,1]
+
+        mouse = mouse[s : s + self.window]
+        buttons = buttons[s : s + self.window]
+
         if self.transform is not None:
             vid = torch.stack([self.transform(frame) for frame in vid])
-            # vid = self.transform(vid.unsqueeze(0))
-            # vid = vid.squeeze(0)
-        return vid.to(torch.bfloat16), mouse[s : s + self.window], buttons[s : s + self.window]
+
+        return (
+            vid.to(torch.bfloat16).permute(1, 0, 2, 3), # [C, T, H, W] for BasicIDM
+            normalise_mouse(mouse),
+            buttons
+        )
 
     def __iter__(self):
         while True:
@@ -107,7 +149,7 @@ def get_loader(batch_size: int, split: Literal["train", "val"] = "train",
         CoDDataset(split=split),
         batch_size=batch_size,
         pin_memory=True,
-        persistent_workers=True,
+        persistent_workers=True if dl_kwargs.get("num_workers", 0) > 0 else False,
         collate_fn=collate_fn,
         # prefetch_factor=12,
         **dl_kwargs,
