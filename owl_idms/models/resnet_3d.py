@@ -63,7 +63,7 @@ class ControlPredictor(nn.Module):
         # input assumed [32,128,128]
         blocks = [
             get_block(ch_0, min(ch_0*2, ch_max)),
-            SpatialTemporalPool(), # -> [16, 64, 64]
+            SpatioTemporalPool(), # -> [16, 64, 64]
             get_block(min(ch_0*2, ch_max), min(ch_0*4, ch_max)),
             SpatioTemporalPool(), # -> [8, 32, 32]
             get_block(min(ch_0*4, ch_max), min(ch_0*8, ch_max)),
