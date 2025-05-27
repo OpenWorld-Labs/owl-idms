@@ -1,0 +1,33 @@
+model:
+  model_id: resnet3d
+  resnet_config:
+    ch_0: 32
+    ch_max: 256
+    blocks_per_stage: [2,2,2,2,2]
+  transformer_config:
+    n_layers: 12
+    n_heads: 12
+    d_model: 768
+  n_buttons: 8
+  n_mouse_axes: 2
+
+train:
+  trainer_id: idm_trainer
+  data_id: cod
+  target_batch_size: 128
+  batch_size: 2
+  epochs: 200
+  opt: "AdamW"
+  opt_kwargs: null
+  loss_weights: null
+  scheduler: null
+  scheduler_kwargs: null
+  checkpoint_dir: "checkpoints/v0"
+  resume_ckpt: null
+  sample_interval: 1000
+  save_interval: 1000
+
+wandb:
+  name: shahbuland
+  project: owl_idms
+  run_name: v0
