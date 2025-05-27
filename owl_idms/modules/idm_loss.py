@@ -118,17 +118,11 @@ class BCEMSE_IDM_Loss(nn.Module):
         pred:   ActionPrediction,
         target: ActionGroundTruth,
     ) -> tuple[Tensor, dict[str, float]]:
+        btn_pred   = pred.buttons            # [B, N_keys] logits
+        mouse_pred = pred.mouse             # [B, 2]
 
-        # -------------------------------------------------------------- #
-        # centre-frame slice                                             #
-        # -------------------------------------------------------------- #
-        mid = target.buttons.size(1) // 2
-
-        btn_pred   = pred.buttons[:, mid]            # [B, N_keys] logits
-        mouse_pred = pred.mouse[:,  mid]             # [B, 2]
-
-        btn_gt     = target.buttons[:, mid].float()  # 0/1
-        mouse_gt   = target.mouse[:,  mid]           # [B, 2]
+        btn_gt     = target.buttons.float()  # 0/1
+        mouse_gt   = target.mouse           # [B, 2]
 
         # -------------------------------------------------------------- #
         # losses                                                         #
@@ -154,7 +148,6 @@ class BCEMSE_IDM_Loss(nn.Module):
             )
 
             all_zero_btn  = (btn_gt.sum(dim=-1) == 0).float().mean()
-            all_zero_mouse = (mouse_gt.abs().sum(dim=-1) == 0).float().mean()
 
         metrics = {
             "total_loss"         : total.item(),
@@ -163,7 +156,6 @@ class BCEMSE_IDM_Loss(nn.Module):
             "button_accuracy"    : btn_acc.item(),
             "button_sensitivity" : nz_acc.item(),   # ← original name restored
             "p(all_zero_buttons)": all_zero_btn.item(),
-            "p(all_zero_mouse)"  : all_zero_mouse.item(),
         }
 
         return total, metrics

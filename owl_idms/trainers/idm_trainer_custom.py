@@ -2,18 +2,12 @@ import torch
 from torch.nn import Module
 from owl_idms.modules.idm_loss import IDMLoss
 from owl_idms._types import ActionGroundTruth, ActionPrediction
-from owl_idms.optim.weight_decay import CosineWDSchedule
 from owl_idms.trainers.base import BaseTrainer, HardwareConfig, OptimizationConfig, LoggingConfig
 from torch.utils.data import DataLoader
-from typing import Callable
-from owl_idms.data.cod_datasets import DEFAULT_TRANSFORM_GPU
-import pathlib
-import datetime
 from stable_ssl import BaseTrainer as BT
 import wandb
 from owl_idms.utils import draw_frame_groundtruth, draw_frame_predicted
-import numpy as np
-import cv2
+
 
 class IDMTrainer(BaseTrainer):
     _do_profile = False
@@ -25,9 +19,8 @@ class IDMTrainer(BaseTrainer):
                  loss: IDMLoss,
                  hardware: HardwareConfig,
                  optim_config: OptimizationConfig,
-                 logging_config: LoggingConfig,
-                 gpu_transform: Callable = None):
-        super().__init__(train_dataloader, val_dataloader, modules, loss, hardware, optim_config, logging_config, gpu_transform)
+                 logging_config: LoggingConfig):
+        super().__init__(train_dataloader, val_dataloader, modules, loss, hardware, optim_config, logging_config)
 
     def _compute_loss(self, video, buttons, mouse):
         pred: ActionPrediction = self._modules['action_predictor'](video)
@@ -46,20 +39,22 @@ class IDMTrainer(BaseTrainer):
     def forward_step(self, batch):
         video, mouse, buttons = batch
         device = self.device
-
+        B, T, C, H, W = video.shape
         video   = video.to(device, dtype=torch.float32, non_blocking=True)
+        video = (video - video.min()) / (video.max() - video.min())
+
         mouse   = mouse.to(device, non_blocking=True)
         buttons = buttons.to(device, non_blocking=True)
-
-        if self.transform is not None:
-            video = self.transform(video)
-            video = (video - video.min()) / (video.max() - video.min())
+        # only predict action for the middle frame
+        mid = T // 2
+        mouse = mouse[:, mid]
+        buttons = buttons[:, mid]
 
         video = video.to(dtype=torch.bfloat16)
         data = self._compute_loss(video, buttons, mouse)
         
         if self.global_idx.item() % self.log_step_frequency == 0:
-            self.log(data["metrics"], flush=False)
+            self.log({f'train/{k}': v for k, v in data["metrics"].items()}, flush=False)
             self.log({'train/loss': data["loss"]}, flush=True)
 
         if self.global_idx.item() % self.log_vis_frequency == 0:
@@ -73,7 +68,7 @@ class IDMTrainer(BaseTrainer):
                 "vis/groundtruth": vis_gt,
                 "vis/raw": vis_vid,
             }, flush=True)
-        return data["loss"]
+        return data
 
     def after_epoch(self):
         super().after_epoch()
@@ -122,16 +117,16 @@ class IDMTrainer(BaseTrainer):
             )
             frame_bgr = frame_uint8[:, :, ::-1].copy()    # RGB → BGR
 
-            # 2. overlays
+            # 2. overlays - NOTE by predicting just 1 action, we repeat it for each frame so we dont do gt_mouse[t] etc.
             gt_frame = draw_frame_groundtruth(
                 frame_bgr,
-                gt_mouse=gt_mouse[t].tolist(),
-                gt_buttons=gt_buttons[t].bool().tolist(),
+                gt_mouse=gt_mouse.tolist(),
+                gt_buttons=gt_buttons.bool().tolist(),
             )
             pred_frame = draw_frame_predicted_new(
                 frame_bgr,
-                pred_mouse=pred_mouse[t].tolist(),
-                pred_buttons=pred_buttons[t],
+                pred_mouse=pred_mouse.tolist(),
+                pred_buttons=pred_buttons,
             )
 
             # 3. back to RGB for WandB
@@ -153,7 +148,8 @@ class IDMTrainer(BaseTrainer):
 
     def eval_step(self, batch: dict):
         with torch.no_grad():
-            loss = self.forward_step(batch)
+            data = self.forward_step(batch)
             if self.global_idx.item() % self.log_step_frequency == 0:
-                self.log({'val/loss': loss.item()}, flush=True)
+                self.log({f'val/{k}': v for k, v in data["metrics"].items()}, flush=False)
+                self.log({'val/loss': data["loss"].item()}, flush=True)
 

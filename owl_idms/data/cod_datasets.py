@@ -6,23 +6,6 @@ from typing import Callable, Literal, Sequence
 import torch
 from torch.utils.data import DataLoader, IterableDataset
 import kornia.augmentation as K
-import itertools 
-
-
-DEFAULT_TRANSFORM_GPU = K.VideoSequential(                # lives on GPU
-    K.RandomAffine(degrees=0.0,
-                   translate=0.05,
-                   scale=(0.9, 1.1),
-                   p=1.0),
-    K.ColorJitter(brightness=0.1,
-                  contrast=0.1,
-                  saturation=0.1,
-                  hue=0.0,
-                  p=1.0),
-    K.RandomGaussianNoise(mean=0.0, std=0.02, p=1.0),
-    data_format="BTCHW",        # (B,T,C,H,W) <-- NOTE on gpu means its in fwd pass
-    same_on_frame=True,        # ➀ same params for all frames in a clip
-)
 
 
 DEFAULT_TRANSFORM_CPU =  K.VideoSequential(
@@ -37,7 +20,7 @@ from torchvision.transforms import Compose, RandomAffine, ColorJitter, Lambda
 TORCHVISION_TRANSFORMS = Compose([
     # RandomAffine(degrees=0.0, translate=(0.05, 0.05), scale=(0.9,1.1)),
     ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1),
-    Lambda(lambda x: x + torch.randn_like(x) * 0.02),
+    Lambda(lambda x: x + (torch.randn_like(x) * 0.02)),
 ])
 
 
@@ -101,7 +84,7 @@ class CoDDataset(IterableDataset):
         window_length: int = 32,
         root: str = "/home/shared/cod_data/",
         split: Literal["train", "val"] = "train",
-        transform: Callable = TORCHVISION_TRANSFORMS,
+        transform: Callable = DEFAULT_TRANSFORM_CPU # TORCHVISION_TRANSFORMS,
     ):
         super().__init__()
         self.window = window_length
@@ -125,7 +108,9 @@ class CoDDataset(IterableDataset):
         buttons = buttons[s : s + self.window]
 
         if self.transform is not None:
-            vid = torch.stack([self.transform(frame) for frame in vid])
+            vid = self.transform(vid.unsqueeze(0)).squeeze(0)
+            # vid = torch.stack([self.transform(frame) for frame in vid])
+            # vid = (vid - vid.min()) / (vid.max() - vid.min())
 
         return (
             vid.to(torch.bfloat16), # [b,t,c,h,w]

@@ -48,7 +48,6 @@ class BaseTrainer(torch.nn.Module):
                  hardware_config: HardwareConfig,
                  optim_config: OptimizationConfig,
                  logging_config: LoggingConfig,
-                 gpu_transform: Module | None = None,
                  eval_first: bool = False):
 
         super().__init__()
@@ -89,7 +88,6 @@ class BaseTrainer(torch.nn.Module):
         self.setup_optimizer()
         self.setup_logging()
         self.setup_modules()
-        self.transform: Module = gpu_transform.to(self.device) if gpu_transform is not None else None
         print(f'Number of trainable parameters: {sum(p.numel() for p in self.trainable_parameters()):,}')
         print(f'Number of untrainable parameters: {sum(p.numel() for p in self.parameters() if not p.requires_grad):,}')
         print(f'Number of total parameters: {sum(p.numel() for p in self.parameters()):,}')
@@ -166,9 +164,9 @@ class BaseTrainer(torch.nn.Module):
                 break
 
     def train_step(self, batch: dict):
-        loss = self.forward_step(batch)
-        print(f'Loss: {loss.item():.4f}')
-        self.scaler.scale(loss).backward()
+        data = self.forward_step(batch)
+        print(f'Loss: {data["loss"].item():.4f}')
+        self.scaler.scale(data["loss"]).backward()
 
         if (self.batch_idx + 1) % self.accumulation_steps == 0:
             self.scaler.unscale_(self.optimizer)

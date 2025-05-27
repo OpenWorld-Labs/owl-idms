@@ -43,6 +43,9 @@ class BasicInverseDynamics(nn.Module):
         # Global average pooling (2D, applied per frame)
         self.gap = nn.AdaptiveAvgPool2d(1)
         
+        self.cls_button = nn.Parameter(torch.randn(1, 1, embed_dim))
+        self.cls_mouse  = nn.Parameter(torch.randn(1, 1, embed_dim))
+
         # Temporal transformer
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=embed_dim,
@@ -79,6 +82,7 @@ class BasicInverseDynamics(nn.Module):
     def forward(self, video: torch.Tensor) -> ActionPrediction:
         """
         video: [B, T, C, H, W] - e.g., [64, 32, 3, 128, 128]
+        outputs action prediction for the middle frame, e.g. 16 to 17
         """
         B, T, C, H, W = video.shape
         
@@ -91,32 +95,33 @@ class BasicInverseDynamics(nn.Module):
         x = F.relu(self.bn3(self.conv3(x)))      # [B, embed_dim, T, H/4, W/4]
         
         # Get dimensions after convolutions
-        B, C_out, T_out, H_out, W_out = x.shape
+        _, D, T, H, W = x.shape
         
-        # Rearrange for spatial pooling: process each frame independently
+        # Rearrange for spatial pooling: process each frame independently and apply 2D GAP to each frame
         x = x.permute(0, 2, 1, 3, 4)  # [B, T, embed_dim, H, W]
-        x = x.reshape(B * T_out, self.embed_dim, H_out, W_out)  # [B*T, embed_dim, H, W]
-        
-        # Apply 2D GAP to each frame
+        x = x.reshape(B * T, self.embed_dim, H, W)  # [B*T, embed_dim, H, W]
         x = self.gap(x)  # [B*T, embed_dim, 1, 1]
         x = x.squeeze(-1).squeeze(-1)  # [B*T, embed_dim]
-        
         # Reshape back to sequence
-        x = x.reshape(B, T_out, self.embed_dim)  # [B, T, embed_dim]
-        
-        # Apply bidirectional transformer across time
+        x = x.reshape(B, T, self.embed_dim)  # [B, T, embed_dim]
+                
+        # Append cls tokens and apply bidirectional transformer across time
+        cls_button = self.cls_button.expand(B, -1, -1)
+        cls_mouse  = self.cls_mouse.expand(B, -1, -1)
+        x = torch.cat([cls_button, cls_mouse, x], dim=1)
         x = self.temporal_transformer(x)  # [B, T, embed_dim]
-        
-        # Final normalization
         x = self.final_norm(x)
+  
         
         # Generate per-frame predictions
-        buttons = self.key_head(x)  # [B, T, n_keys]
-        mouse_mu = self.mouse_delta_head(x)  # [B, T, 2]
+        button_tok = x[:, 0]
+        mouse_tok  = x[:, 1]
+        buttons = self.key_head(button_tok)  # [B, n_keys]
+        mouse = self.mouse_delta_head(mouse_tok)  # [B, 2]
         
         return ActionPrediction(
             buttons=buttons,
-            mouse=mouse_mu,
+            mouse=mouse,
         )
 
 def basic_idm_base(n_keys: int = len(KEYBINDS), n_frames: int = 1, **kwargs):
