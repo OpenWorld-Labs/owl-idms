@@ -52,25 +52,26 @@ class ControlPredictor(nn.Module):
         self.proj_t_in = nn.Linear(self.r_config.ch_max, self.t_config.d_model)
         self.pos_enc = LearnedPosEnc(256, self.t_config.d_model)
 
-        n_per_block = 2
+        n_per_block = 1
         total_blocks = 5
 
         def get_block(ch_in, ch_out):
             return SameBlock(ch_in, ch_out, n_per_block, n_per_block * total_blocks)
         ch_0 = self.r_config.ch_0
+        ch_max = self.r_config.ch_max
 
         # input assumed [32,128,128]
         blocks = [
-            get_block(ch_0, ch_0*2),
-            SpatialPool(), # -> [32, 64, 64]
-            get_block(ch_0*2,ch_0*4),
-            SpatialPool(), # -> [32, 32, 32]
-            get_block(ch_0*4,ch_0*8),
-            SpatioTemporalPool(), # -> [16, 16, 16]
-            get_block(ch_0*8,ch_0*8), 
-            SpatialPool(), # -> [16, 8, 8]
-            get_block(ch_0*8,ch_0*8),
-            SpatialPool() # -> [16, 4, 4]
+            get_block(ch_0, min(ch_0*2, ch_max)),
+            SpatialTemporalPool(), # -> [16, 64, 64]
+            get_block(min(ch_0*2, ch_max), min(ch_0*4, ch_max)),
+            SpatioTemporalPool(), # -> [8, 32, 32]
+            get_block(min(ch_0*4, ch_max), min(ch_0*8, ch_max)),
+            SpatialPool(), # -> [8, 16, 16]
+            get_block(min(ch_0*8, ch_max), ch_max),
+            SpatialPool(), # -> [8, 8, 8]
+            get_block(ch_max, ch_max),
+            SpatialPool() # -> [8, 4, 4]
         ]
         self.blocks = nn.Sequential(*blocks)
 

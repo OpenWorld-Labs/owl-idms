@@ -22,6 +22,28 @@ def latent_reg_loss(z):
     loss = eo.reduce(loss, 'b ... -> b', reduction = 'sum').mean()
     return 0.5 * loss
 
+def rescale_mouse(mouse):
+    # mouse is [b,n,2]
+    # Get magnitude of mouse movement vectors
+    mag = torch.norm(mouse, dim=-1, keepdim=True) # [b,n,1]
+    # Get direction of vectors
+    direction = mouse / (mag + 1e-8) # [b,n,2]
+    # Apply log1p to magnitudes
+    scaled_mag = torch.log1p(mag) # [b,n,1]
+    # Scale direction vectors by new magnitudes
+    return direction * scaled_mag # [b,n,2]
+
+def unscale_mouse(mouse):
+    # mouse is [b,n,2]
+    # Get magnitude of mouse movement vectors
+    mag = torch.norm(mouse, dim=-1, keepdim=True) # [b,n,1]
+    # Get direction of vectors 
+    direction = mouse / (mag + 1e-8) # [b,n,2]
+    # Apply expm1 to magnitudes (inverse of log1p)
+    unscaled_mag = torch.expm1(mag) # [b,n,1]
+    # Scale direction vectors by new magnitudes
+    return direction * unscaled_mag # [b,n,2]
+
 class IDMTrainer(BaseTrainer):
     """
     Trainer for IDM
@@ -78,8 +100,10 @@ class IDMTrainer(BaseTrainer):
         self.total_step_counter = save_dict['steps']
 
     def train(self):
+        torch.cuda.set_device(self.local_rank)
+
         # Prepare model and ema
-        self.model = self.model.to(device).train()
+        self.model = self.model.cuda().train()
         if self.world_size > 1:
             self.model = DDP(self.model)
 
@@ -103,7 +127,7 @@ class IDMTrainer(BaseTrainer):
         accum_steps = self.train_cfg.target_batch_size // self.train_cfg.batch_size // self.world_size
         accum_steps = max(1, accum_steps)
         self.scaler = torch.amp.GradScaler()
-        ctx = torch.amp.autocast(device, torch.bfloat16)
+        ctx = torch.amp.autocast('cuda', torch.bfloat16)
 
         # Timer reset
         timer = Timer()
@@ -114,18 +138,27 @@ class IDMTrainer(BaseTrainer):
 
         local_step = 0
         for _ in range(self.train_cfg.epochs):
-            for videos, button_input, mouse_input in loader:
+            for videos, mouse_input, button_input in loader:
                 # Move data to device
-                videos = videos.to(device).bfloat16()
-                button_input = button_input.to(device)
-                mouse_input = mouse_input.to(device)
+                videos = videos.cuda().bfloat16()
+                button_target = button_input.cuda()[:,16]
+                mouse_target = rescale_mouse(mouse_input.cuda())[:,16]
 
                 with ctx:
                     # Forward pass
-                    button_logits, mouse_pred = self.model(videos)
+                    mouse_pred, button_logits = self.model(videos)
 
-                    # TODO: Implement loss calculation and metrics here
-                    total_loss = 0.0  # Placeholder
+                    mouse_loss = F.mse_loss(mouse_target, mouse_pred) / accum_steps
+                    button_loss = F.binary_cross_entropy_with_logits(button_logits, button_target.float()) / accum_steps
+
+                    total_loss = mouse_loss + button_loss
+
+                # Calculate sensitivity (true positive rate) for buttons
+                with torch.no_grad():
+                    button_preds = (torch.sigmoid(button_logits) > 0.5).float()
+                    true_positives = (button_preds * button_target).sum()
+                    total_positives = button_target.sum()
+                    sensitivity = true_positives / (total_positives + 1e-8)  # Avoid div by 0
 
                 self.scaler.scale(total_loss).backward()
 
@@ -144,7 +177,14 @@ class IDMTrainer(BaseTrainer):
                         self.scheduler.step()
                     self.ema.update()
 
-                    # TODO: Add logging and metrics here
+                    # Log metrics to wandb
+                    wandb.log({
+                        "mouse_loss": mouse_loss.item() * accum_steps,
+                        "button_loss": button_loss.item() * accum_steps,
+                        "total_loss": total_loss.item() * accum_steps,
+                        "button_sensitivity": sensitivity.item(),
+                        "time_per_step": timer.get_time()
+                    }, step=self.total_step_counter)
                     timer.reset()
 
                     self.total_step_counter += 1
