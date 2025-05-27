@@ -6,7 +6,7 @@ from owl_idms.optim.weight_decay import CosineWDSchedule
 from owl_idms.trainers.base import BaseTrainer, HardwareConfig, OptimizationConfig, LoggingConfig
 from torch.utils.data import DataLoader
 from typing import Callable
-from owl_idms.data.cod_datasets import DEFAULT_TRANSFORM
+from owl_idms.data.cod_datasets import DEFAULT_TRANSFORM_GPU
 import pathlib
 import datetime
 from stable_ssl import BaseTrainer as BT
@@ -26,8 +26,8 @@ class IDMTrainer(BaseTrainer):
                  hardware: HardwareConfig,
                  optim_config: OptimizationConfig,
                  logging_config: LoggingConfig,
-                 transform: Callable = DEFAULT_TRANSFORM):
-        super().__init__(train_dataloader, val_dataloader, modules, loss, hardware, optim_config, logging_config, transform)
+                 gpu_transform: Callable = None):
+        super().__init__(train_dataloader, val_dataloader, modules, loss, hardware, optim_config, logging_config, gpu_transform)
 
     def _compute_loss(self, video, buttons, mouse):
         videos_as_frames = video.view(-1, *video.shape[2:])

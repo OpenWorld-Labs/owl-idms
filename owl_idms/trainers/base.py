@@ -48,7 +48,7 @@ class BaseTrainer(torch.nn.Module):
                  hardware_config: HardwareConfig,
                  optim_config: OptimizationConfig,
                  logging_config: LoggingConfig,
-                 transform: Module | None = None,
+                 gpu_transform: Module | None = None,
                  eval_first: bool = False):
 
         super().__init__()
@@ -89,10 +89,12 @@ class BaseTrainer(torch.nn.Module):
         self.setup_optimizer()
         self.setup_logging()
         self.setup_modules()
-        self.transform: Module = transform.to(self.device)
+        self.transform: Module = gpu_transform.to(self.device) if gpu_transform is not None else None
         print(f'Number of trainable parameters: {sum(p.numel() for p in self.trainable_parameters()):,}')
         print(f'Number of untrainable parameters: {sum(p.numel() for p in self.parameters() if not p.requires_grad):,}')
         print(f'Number of total parameters: {sum(p.numel() for p in self.parameters()):,}')
+        self.global_idx.to(torch.device('cpu'))
+        self.current_epoch.to(torch.device('cpu'))
 
     def setup_modules(self):
         for module in self._modules.values():

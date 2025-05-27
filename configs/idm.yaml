@@ -2,7 +2,7 @@ optim:
   epochs: 12
   accumulation_steps: 1
   grad_max_norm: 1.0
-  iterations_per_epoch: 10_000
+  iterations_per_epoch: 5_000
   optimizer:
     _target_: owl_idms.optim.muon
     _partial_: true
@@ -14,7 +14,7 @@ optim:
 
 logging:
   save_epoch_frequency: 1
-  log_step_frequency: 25
+  log_step_frequency: 100
   log_vis_frequency: 500
   eval_every_n_epochs: 1
   load_path: null
@@ -36,8 +36,8 @@ loss:
 train_dataloader:
   _target_: owl_idms.data.get_cod_loader
   split: train
-  batch_size: 100
-  num_workers: 24
+  batch_size: 117
+  num_workers:  24
 val_dataloader:
   _target_: owl_idms.data.get_cod_loader
   split: val

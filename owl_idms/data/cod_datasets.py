@@ -6,9 +6,10 @@ from typing import Callable, Literal, Sequence
 import torch
 from torch.utils.data import DataLoader, IterableDataset
 import kornia.augmentation as K
+import itertools 
 
 
-DEFAULT_TRANSFORM = K.VideoSequential(                # lives on GPU
+DEFAULT_TRANSFORM_GPU = K.VideoSequential(                # lives on GPU
     K.RandomAffine(degrees=0.0,
                    translate=0.05,
                    scale=(0.9, 1.1),
@@ -19,9 +20,25 @@ DEFAULT_TRANSFORM = K.VideoSequential(                # lives on GPU
                   hue=0.0,
                   p=1.0),
     K.RandomGaussianNoise(mean=0.0, std=0.02, p=1.0),
-    data_format="BTCHW",        # (B,T,C,H,W)
+    data_format="BTCHW",        # (B,T,C,H,W) <-- NOTE on gpu means its in fwd pass
     same_on_frame=True,        # ➀ same params for all frames in a clip
 )
+
+
+DEFAULT_TRANSFORM_CPU =  K.VideoSequential(
+        K.RandomAffine(degrees=0.0, translate=0.05, scale=(0.9,1.1), p=1.0),
+        K.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1, p=1.0),
+        K.RandomGaussianNoise(mean=0.0, std=0.02, p=1.0),
+        data_format="BTCHW",       # expects (B,T,C,H,W)
+        same_on_frame=True,
+)
+
+from torchvision.transforms import Compose, RandomAffine, ColorJitter, Lambda
+TORCHVISION_TRANSFORMS = Compose([
+    RandomAffine(degrees=0.0, translate=(0.05, 0.05), scale=(0.9,1.1)),
+    ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1),
+    Lambda(lambda x: x + torch.randn_like(x) * 0.02),
+])
 
 
 @cache
@@ -49,12 +66,14 @@ class CoDDataset(IterableDataset):
         window_length: int = 32,
         root: str = "/home/shared/cod_data/",
         split: Literal["train", "val"] = "train",
+        transform: Callable = TORCHVISION_TRANSFORMS,
     ):
         super().__init__()
         self.window = window_length
         paths = get_cod_paths(root)
         cut = int(len(paths) * 0.75)
         self.paths = paths[:cut] if split == "train" else paths[cut:]
+        self.transform = transform
 
     # ------------------------------------------------------------------
     def _random_clip(self):
@@ -66,7 +85,10 @@ class CoDDataset(IterableDataset):
         s = random.randint(0, min(len(vid), len(mouse), len(buttons)) - self.window)
         vid = vid[s : s + self.window].float()                      # [-1,1]
         vid = (vid + 1.0) * 0.5                                     # → [0,1]
-
+        if self.transform is not None:
+            vid = torch.stack([self.transform(frame) for frame in vid])
+            # vid = self.transform(vid.unsqueeze(0))
+            # vid = vid.squeeze(0)
         return vid.to(torch.bfloat16), mouse[s : s + self.window], buttons[s : s + self.window]
 
     def __iter__(self):
@@ -85,6 +107,7 @@ def get_loader(batch_size: int, split: Literal["train", "val"] = "train",
         CoDDataset(split=split),
         batch_size=batch_size,
         pin_memory=True,
+        persistent_workers=True,
         collate_fn=collate_fn,
         # prefetch_factor=12,
         **dl_kwargs,
