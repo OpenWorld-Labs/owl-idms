@@ -4,11 +4,23 @@ from torch import Tensor
 
 @dataclass
 class ActionGroundTruth:
-    buttons: Tensor          # [B, N_keys]  binary 0/1
-    mouse: Tensor         # [B, 2]       delta x, delta y  (ground-truth)
+    """
+    Ground-truth controls for an **entire clip**.
+
+    buttons : binary tensor  – shape [B, T, N_keys]
+    mouse   : float tensor   – shape [B, T, 2]  (dx, dy)
+    """
+    buttons: Tensor          # 0 / 1
+    mouse:   Tensor          # real-valued
+
 
 @dataclass
 class ActionPrediction:
-    buttons: Tensor           # [B, N_keys]  logits
-    mouse_mu: Tensor          # [B, 2]       mean delta x, delta y
-    mouse_log_sigma: Tensor   # [B, 2]       log sigma  (unconstrained)
+    """
+    Model outputs for an **entire clip**.
+
+    buttons : logits tensor  – shape [B, T, N_keys]
+    mouse   : float tensor   – shape [B, T, 2]  (predicted dx, dy)
+    """
+    buttons: Tensor
+    mouse:   Tensor

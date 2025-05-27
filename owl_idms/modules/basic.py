@@ -1,66 +1,123 @@
 import torch
 from torch import nn
+import torch.nn.functional as F
 
 from owl_idms.modules.utils import PositionalEncoding
 from owl_idms._types import ActionPrediction
 from owl_idms.constants import KEYBINDS
 
 
-
 class BasicInverseDynamics(nn.Module):
-    """
-    Basic IDM from a bunch of Conv3Ds and a final transformer encoder block or two.
-    """
-
-    def __init__(self,
+    def __init__(self, 
                  n_keys: int,
                  n_frames: int,
                  in_channels: int = 3,
                  embed_dim: int = 128,
-                 **kwargs): 
+                 **kwargs):
         super().__init__()
-
-        self.conv1 = nn.Conv3d(in_channels, embed_dim, kernel_size=(3, 3, 3), padding=(1, 1, 1))
-        self.conv2 = nn.Conv3d(embed_dim, embed_dim, kernel_size=(3, 3, 3), padding=(1, 1, 1))
-        self.conv3 = nn.Conv3d(embed_dim, embed_dim, kernel_size=(3, 3, 3), padding=(1, 1, 1))
-
-        self.pos_enc = PositionalEncoding(embed_dim)
-        self._encoder_layer = nn.TransformerEncoderLayer(embed_dim, nhead=8)
-        self.transformer_encoder = nn.TransformerEncoder(self._encoder_layer, num_layers=2)
-
-        self.final_ln = nn.LayerNorm(embed_dim)
-        self.key_head = nn.Linear(embed_dim, n_keys * n_frames)
-        self.mouse_mu_head = nn.Linear(embed_dim, 2 * n_frames)
-        self.mouse_logsigma_head = nn.Linear(embed_dim, 2 * n_frames)
-
-        self._init_weights()
-
-    def _init_weights(self, std: float = 0.02):
-        for m in self.modules():
-            if isinstance(m, nn.Linear):
-                nn.init.trunc_normal_(m.weight, std=std)
-                if m.bias is not None:
-                    nn.init.zeros_(m.bias)
-            elif isinstance(m, nn.Conv3d):
-                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
-                if m.bias is not None:
-                    nn.init.zeros_(m.bias)
-            elif isinstance(m, nn.LayerNorm):
-                nn.init.ones_(m.weight)
-
-    def forward(self, video: torch.Tensor) -> ActionPrediction:
-        x = self.conv1(video)
-        x = self.conv2(x)
-        x = self.conv3(x)
-        x = self.transformer_encoder(x)  # TODO [B, T, C, H, W] but need to patchify so we dont attend 128x128
-        x = self.final_ln(x)
-        return ActionPrediction(
-            keys=self.key_head(x),
-            mouse_mu=self.mouse_mu_head(x),
-            mouse_log_sigma=self.mouse_logsigma_head(x)
+        
+        self.n_frames = n_frames
+        self.embed_dim = embed_dim
+        
+        # Conv3D layers with temporal awareness
+        self.conv1 = nn.Conv3d(in_channels, 64, 
+                              kernel_size=(5, 7, 7),  # Large temporal kernel
+                              stride=(1, 2, 2),       # Only downsample spatially
+                              padding=(2, 3, 3))      # Maintain temporal dimension
+        
+        self.conv2 = nn.Conv3d(64, 128, 
+                              kernel_size=(3, 5, 5), 
+                              stride=(1, 2, 2), 
+                              padding=(1, 2, 2))
+        
+        self.conv3 = nn.Conv3d(128, embed_dim, 
+                              kernel_size=(3, 3, 3), 
+                              stride=(1, 1, 1), 
+                              padding=(1, 1, 1))
+        
+        # BatchNorm for stability
+        self.bn1 = nn.BatchNorm3d(64)
+        self.bn2 = nn.BatchNorm3d(128)
+        self.bn3 = nn.BatchNorm3d(embed_dim)
+        
+        # Global average pooling (2D, applied per frame)
+        self.gap = nn.AdaptiveAvgPool2d(1)
+        
+        # Temporal transformer
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=embed_dim,
+            nhead=8,
+            dim_feedforward=512,
+            dropout=0.1,
+            activation='gelu',
+            batch_first=True,
+            norm_first=True  # Pre-norm for stability
         )
-
+        self.temporal_transformer = nn.TransformerEncoder(encoder_layer, num_layers=2)
+        
+        # Final normalization
+        self.final_norm = nn.LayerNorm(embed_dim)
+        
+        # Prediction heads (per-frame)
+        self.key_head = nn.Linear(embed_dim, n_keys)
+        self.mouse_delta_head = nn.Linear(embed_dim, 2)
+        
+        self._init_weights()
+    
+    def _init_weights(self):
+        # Initialize conv layers
+        for m in [self.conv1, self.conv2, self.conv3]:
+            nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+            if m.bias is not None:
+                nn.init.zeros_(m.bias)
+        
+        # Initialize linear layers
+        for m in [self.key_head, self.mouse_delta_head]:
+            nn.init.xavier_uniform_(m.weight)
+            nn.init.zeros_(m.bias)
+    
+    def forward(self, video: torch.Tensor) -> ActionPrediction:
+        """
+        video: [B, T, C, H, W] - e.g., [64, 32, 3, 128, 128]
+        """
+        B, T, C, H, W = video.shape
+        
+        # Rearrange for Conv3D: [B, C, T, H, W]
+        video = video.transpose(1, 2)
+        
+        # Apply Conv3D layers with non-causal temporal processing
+        x = F.relu(self.bn1(self.conv1(video)))  # [B, 64, T, H/2, W/2]
+        x = F.relu(self.bn2(self.conv2(x)))      # [B, 128, T, H/4, W/4]
+        x = F.relu(self.bn3(self.conv3(x)))      # [B, embed_dim, T, H/4, W/4]
+        
+        # Get dimensions after convolutions
+        B, C_out, T_out, H_out, W_out = x.shape
+        
+        # Rearrange for spatial pooling: process each frame independently
+        x = x.permute(0, 2, 1, 3, 4)  # [B, T, embed_dim, H, W]
+        x = x.reshape(B * T_out, self.embed_dim, H_out, W_out)  # [B*T, embed_dim, H, W]
+        
+        # Apply 2D GAP to each frame
+        x = self.gap(x)  # [B*T, embed_dim, 1, 1]
+        x = x.squeeze(-1).squeeze(-1)  # [B*T, embed_dim]
+        
+        # Reshape back to sequence
+        x = x.reshape(B, T_out, self.embed_dim)  # [B, T, embed_dim]
+        
+        # Apply bidirectional transformer across time
+        x = self.temporal_transformer(x)  # [B, T, embed_dim]
+        
+        # Final normalization
+        x = self.final_norm(x)
+        
+        # Generate per-frame predictions
+        buttons = self.key_head(x)  # [B, T, n_keys]
+        mouse_mu = self.mouse_delta_head(x)  # [B, T, 2]
+        
+        return ActionPrediction(
+            buttons=buttons,
+            mouse=mouse_mu,
+        )
 
 def basic_idm_base(n_keys: int = len(KEYBINDS), n_frames: int = 1, **kwargs):
     return BasicInverseDynamics(n_keys, n_frames, **kwargs)
-

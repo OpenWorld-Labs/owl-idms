@@ -35,7 +35,7 @@ DEFAULT_TRANSFORM_CPU =  K.VideoSequential(
 
 from torchvision.transforms import Compose, RandomAffine, ColorJitter, Lambda
 TORCHVISION_TRANSFORMS = Compose([
-    RandomAffine(degrees=0.0, translate=(0.05, 0.05), scale=(0.9,1.1)),
+    # RandomAffine(degrees=0.0, translate=(0.05, 0.05), scale=(0.9,1.1)),
     ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1),
     Lambda(lambda x: x + torch.randn_like(x) * 0.02),
 ])
@@ -106,7 +106,7 @@ class CoDDataset(IterableDataset):
         super().__init__()
         self.window = window_length
         paths = get_cod_paths(root)
-        cut = int(len(paths) * 0.75)
+        cut = int(len(paths) * 0.85)
         self.paths = paths[:cut] if split == "train" else paths[cut:]
         self.transform = transform
 
@@ -128,7 +128,7 @@ class CoDDataset(IterableDataset):
             vid = torch.stack([self.transform(frame) for frame in vid])
 
         return (
-            vid.to(torch.bfloat16).permute(1, 0, 2, 3), # [C, T, H, W] for BasicIDM
+            vid.to(torch.bfloat16), # [b,t,c,h,w]
             normalise_mouse(mouse),
             buttons
         )
@@ -149,7 +149,8 @@ def get_loader(batch_size: int, split: Literal["train", "val"] = "train",
         CoDDataset(split=split),
         batch_size=batch_size,
         pin_memory=True,
-        persistent_workers=True if dl_kwargs.get("num_workers", 0) > 0 else False,
+        persistent_workers=False, # TODO 
+        # persistent_workers=True if dl_kwargs.get("num_workers", 0) > 0 else False,
         collate_fn=collate_fn,
         # prefetch_factor=12,
         **dl_kwargs,

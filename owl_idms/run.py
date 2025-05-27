@@ -30,7 +30,7 @@ def main(cfg: DictConfig):
     # -- dataloaders
     train_dataloader = hydra.utils.instantiate(cfg.train_dataloader, _convert_="object", _recursive_=False)
     val_dataloader = hydra.utils.instantiate(cfg.val_dataloader, _convert_="object", _recursive_=False)
-    
+
     # -- trainer
     from owl_idms.trainers.idm_trainer_custom import IDMTrainer
     trainer = IDMTrainer(

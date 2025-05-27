@@ -1,8 +1,8 @@
 optim:
-  epochs: 12
+  epochs: 10
   accumulation_steps: 1
   grad_max_norm: 1.0
-  iterations_per_epoch: 5_000
+  iterations_per_epoch: 500
   optimizer:
     _target_: owl_idms.optim.muon
     _partial_: true
@@ -14,8 +14,8 @@ optim:
 
 logging:
   save_epoch_frequency: 1
-  log_step_frequency: 100
-  log_vis_frequency: 500
+  log_step_frequency: 25
+  log_vis_frequency: 100
   eval_every_n_epochs: 1
   load_path: null
   # load_path: /home/sami/owl_idms/outputs/2025-05-26/03-50-06/epoch_4.pt
@@ -27,22 +27,18 @@ hardware:
   global_rank: null # set at runtime
 
 loss:
-  _target_: owl_idms.modules.idm_loss
-  mouse_weight: 0.3
-  eps: 1e-6
-  full: True
-  reduction: mean
+  _target_: owl_idms.modules.bce_mse_idm_loss
 
 train_dataloader:
   _target_: owl_idms.data.get_cod_loader
   split: train
-  batch_size: 64
-  num_workers:  24
+  batch_size: 256
+  num_workers:  16
 val_dataloader:
   _target_: owl_idms.data.get_cod_loader
   split: val
-  batch_size: 8
-  num_workers: 24
+  batch_size: 128
+  num_workers: 6
 
 modules:
   action_predictor:

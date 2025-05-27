@@ -259,6 +259,27 @@ def draw_frame_groundtruth(
         resize_to=resize_to,
     )
 
+def draw_frame_predicted_new(
+    frame: np.ndarray,
+    *,
+    pred_mouse: Tuple[float, float],
+    pred_buttons: Sequence[float] | np.ndarray,  # logits or probs
+    threshold: float = 0.5,
+    resize_to: int | None = 512,
+) -> np.ndarray:
+    """Overlay model prediction (red arrow + optional 1‑σ ellipse)."""
+    prob = np.asarray(pred_buttons, dtype=np.float32)
+    if prob.ndim == 0:
+        prob = prob[None]
+    pressed = prob >= threshold
+
+    return _draw_frame(
+        frame,
+        mouse_vec=pred_mouse,
+        buttons=pressed.tolist(),
+        color=(0, 0, 255),
+        resize_to=resize_to,
+    )
 
 def draw_frame_predicted(
     frame: np.ndarray,

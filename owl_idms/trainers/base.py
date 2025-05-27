@@ -245,5 +245,3 @@ class BaseTrainer(torch.nn.Module):
 
     def after_eval(self):
         pass
-    
-    
