@@ -49,14 +49,12 @@ class CoDDataset(IterableDataset):
         window_length: int = 32,
         root: str = "/home/shared/cod_data/",
         split: Literal["train", "val"] = "train",
-        transform: Callable[[torch.Tensor], torch.Tensor] | None = None,
     ):
         super().__init__()
         self.window = window_length
         paths = get_cod_paths(root)
         cut = int(len(paths) * 0.75)
         self.paths = paths[:cut] if split == "train" else paths[cut:]
-        self.transform = transform
 
     # ------------------------------------------------------------------
     def _random_clip(self):
@@ -68,9 +66,6 @@ class CoDDataset(IterableDataset):
         s = random.randint(0, min(len(vid), len(mouse), len(buttons)) - self.window)
         vid = vid[s : s + self.window].float()                      # [-1,1]
         vid = (vid + 1.0) * 0.5                                     # → [0,1]
-
-        if self.transform is not None:
-            vid = self.transform(vid)
 
         return vid.to(torch.bfloat16), mouse[s : s + self.window], buttons[s : s + self.window]
 
@@ -84,7 +79,8 @@ def collate_fn(batch: Sequence):
     return torch.stack(v), torch.stack(m), torch.stack(b)
 
 
-def get_loader(batch_size: int, split: Literal["train", "val"] = "train", **dl_kwargs):
+def get_loader(batch_size: int, split: Literal["train", "val"] = "train",
+               **dl_kwargs):
     return DataLoader(
         CoDDataset(split=split),
         batch_size=batch_size,

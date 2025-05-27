@@ -16,3 +16,6 @@ diffusers
 
 # pytorch-lightning
 lightning
+opencv-python
+wandb
+wandb[media]

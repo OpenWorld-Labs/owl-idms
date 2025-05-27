@@ -56,6 +56,9 @@ def flux(do_compile: bool = True, requires_grad: bool = True):
 
 
 if __name__ == "__main__":
-    vae = sd()
-    x = torch.randn(1, 3, 256, 256)
-    print(vae(x).shape)
+    vaes = [sd(), sdxl(), flux()]
+    names = ["SD", "SDXL", "Flux"]
+    
+    for name, vae in zip(names, vaes):
+        param_count = sum(p.numel() for p in vae.parameters())
+        print(f"{name} VAE parameter count: {param_count:,}")

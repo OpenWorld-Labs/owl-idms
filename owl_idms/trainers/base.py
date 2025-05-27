@@ -31,7 +31,10 @@ class OptimizationConfig(TypedDict):
 class LoggingConfig(TypedDict):
     save_epoch_frequency: int
     log_step_frequency: int
+    log_vis_frequency: int
+    eval_every_n_epochs: int
     save_path: Path = Path("./checkpoints")
+    load_path: Path | None = None
 
 class BaseTrainer(torch.nn.Module):
 
@@ -45,11 +48,13 @@ class BaseTrainer(torch.nn.Module):
                  hardware_config: HardwareConfig,
                  optim_config: OptimizationConfig,
                  logging_config: LoggingConfig,
-                 transform: Module | None = None):
+                 transform: Module | None = None,
+                 eval_first: bool = False):
 
         super().__init__()
         self.epochs = optim_config['epochs']
         self.iterations_per_epoch = optim_config['iterations_per_epoch']
+        self.eval_first = eval_first
         # -- model
         self._modules = modules
         # -- dataloaders
@@ -74,17 +79,29 @@ class BaseTrainer(torch.nn.Module):
         # -- logging
         self.save_epoch_frequency = logging_config['save_epoch_frequency']
         self.log_step_frequency   = logging_config['log_step_frequency']
+        self.log_vis_frequency    = logging_config['log_vis_frequency'] # Used in subclasses only
         self.save_path            = Path(HydraConfig.get().runtime.output_dir)
         self.eval_every_n_epochs  = logging_config['eval_every_n_epochs']
         self.log_buffer           = {}
+        self.load_path            = logging_config['load_path'] and Path(logging_config['load_path'])
         # -- after all attributes are set we can start setting up ddp and devices
         self.setup_hardware()
         self.setup_optimizer()
         self.setup_logging()
+        self.setup_modules()
         self.transform: Module = transform.to(self.device)
         print(f'Number of trainable parameters: {sum(p.numel() for p in self.trainable_parameters()):,}')
         print(f'Number of untrainable parameters: {sum(p.numel() for p in self.parameters() if not p.requires_grad):,}')
         print(f'Number of total parameters: {sum(p.numel() for p in self.parameters()):,}')
+
+    def setup_modules(self):
+        for module in self._modules.values():
+            print(f'Setting up module {module.__class__.__name__} on device {self.device}')
+            module.to(self.device)
+
+        if self.load_path is not None:
+            print(f'Loading checkpoint from {self.load_path}')
+            self.load_checkpoint(self.load_path)
 
     def setup_hardware(self):
         if not torch.cuda.is_available() or self.device == "cpu":
@@ -121,9 +138,11 @@ class BaseTrainer(torch.nn.Module):
     def train_(self):
         self.before_train()
         with torch.amp.autocast(device_type=self.device.type, dtype=torch.bfloat16):
+            if self.eval_first:
+                self.eval_epoch()
             for epoch in range(self.epochs):
                 print(f'Training epoch {epoch} of {self.epochs}, started at {time.time()}')
-                self.current_epoch = torch.tensor(epoch, device=self.device)
+                self.current_epoch[0] = torch.tensor(epoch, device=self.device)
                 self.before_epoch()
                 self.train_epoch()
                 if epoch % self.eval_every_n_epochs == 0:
@@ -181,7 +200,7 @@ class BaseTrainer(torch.nn.Module):
 
     def after_epoch(self):
         if self.current_epoch % self.save_epoch_frequency == 0:
-            self.save_checkpoint(path=self.save_path / f"epoch_{self.current_epoch}.pt")
+            self.save_checkpoint(path=self.save_path / f"epoch_{self.current_epoch.item()}.pt")
 
     def after_train(self):
         pass
@@ -198,7 +217,13 @@ class BaseTrainer(torch.nn.Module):
         torch.save(self.state_dict(), path)
 
     def load_checkpoint(self, path: Path):
-        self.load_state_dict(torch.load(path))
+        state_dict = torch.load(path, map_location=self.device)
+        # Patch current_epoch shape if needed
+        if 'current_epoch' in state_dict:
+            curr = state_dict['current_epoch']
+            if curr.dim() == 0:  # scalar, shape []
+                state_dict['current_epoch'] = curr.unsqueeze(0)  # shape [1]
+        self.load_state_dict(state_dict)
 
     # ---- evaluation
     def eval_epoch(self):
@@ -214,13 +239,7 @@ class BaseTrainer(torch.nn.Module):
                 break
 
     def eval_step(self, batch: dict):
-        with torch.no_grad():
-            loss = self.forward_step(batch)
-            print(f'Eval loss: {loss.item():.4f}')
-            if self.global_idx.item() % self.log_step_frequency == 0:
-                self.log(None, flush=True)
-
-
+        pass
 
     def after_eval(self):
         pass

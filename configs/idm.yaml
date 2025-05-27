@@ -15,7 +15,10 @@ optim:
 logging:
   save_epoch_frequency: 1
   log_step_frequency: 25
+  log_vis_frequency: 500
   eval_every_n_epochs: 1
+  load_path: null
+  # load_path: /home/sami/owl_idms/outputs/2025-05-26/03-50-06/epoch_4.pt
 
 hardware:
   device: cuda
@@ -33,12 +36,12 @@ loss:
 train_dataloader:
   _target_: owl_idms.data.get_cod_loader
   split: train
-  batch_size: 64
+  batch_size: 100
   num_workers: 24
 val_dataloader:
   _target_: owl_idms.data.get_cod_loader
   split: val
-  batch_size: 64
+  batch_size: 8
   num_workers: 24
 
 modules:

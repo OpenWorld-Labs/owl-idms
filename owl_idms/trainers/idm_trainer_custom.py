@@ -9,6 +9,11 @@ from typing import Callable
 from owl_idms.data.cod_datasets import DEFAULT_TRANSFORM
 import pathlib
 import datetime
+from stable_ssl import BaseTrainer as BT
+import wandb
+from owl_idms.utils import draw_frame_groundtruth, draw_frame_predicted
+import numpy as np
+import cv2
 
 class IDMTrainer(BaseTrainer):
     _do_profile = False
@@ -34,73 +39,129 @@ class IDMTrainer(BaseTrainer):
         gt = ActionGroundTruth(buttons=buttons, mouse=mouse)        
         kp_loss, mouse_loss = self.loss(pred, gt)
         return {
-            "loss": kp_loss + mouse_loss,
-            "kp":   kp_loss,
-            "mouse": mouse_loss,
+            "loss": {
+                "total": kp_loss + mouse_loss,
+                "kp":   kp_loss,
+                "mouse": mouse_loss,
+            },
+            "data": {
+                "pred": pred,
+                "gt": gt,
+            },
         }
 
 
     def forward_step(self, batch):
-        self._ensure_profiler()
-
         video, mouse, buttons = batch
         device = self.device
 
-        with torch.autograd.profiler.record_function("to_device"):
-            video   = video.to(device, dtype=torch.float32, non_blocking=True)
-            mouse   = mouse.to(device, non_blocking=True)
-            buttons = buttons.to(device, non_blocking=True)
+        video   = video.to(device, dtype=torch.float32, non_blocking=True)
+        mouse   = mouse.to(device, non_blocking=True)
+        buttons = buttons.to(device, non_blocking=True)
 
         if self.transform is not None:
-            with torch.autograd.profiler.record_function("augment"):
-                video = self.transform(video)         # GPU augments
+            video = self.transform(video)
+            video = (video - video.min()) / (video.max() - video.min())
 
-        with torch.autograd.profiler.record_function("cast_bf16"):
-            video = video.to(dtype=torch.bfloat16)
+        video = video.to(dtype=torch.bfloat16)
+        data = self._compute_loss(video, buttons, mouse)
+        self.log(data["loss"], flush=False)
 
-        with torch.autograd.profiler.record_function("fwd_and_loss"):
-            loss_dict = self._compute_loss(video, buttons, mouse)
-
-        self.log(loss_dict, flush=False)
-
-        # 3.  Advance the profiler
-        if self._prof is not None:
-            self._prof.step()
-
-        return loss_dict["loss"]
+        if self.global_idx.item() % self.log_vis_frequency == 0:
+            gt_mouse, gt_buttons = data["data"]["gt"].mouse, data["data"]["gt"].buttons
+            pred_mouse_mu, pred_mouse_log_sigma, pred_buttons = data["data"]["pred"].mouse_mu, data["data"]["pred"].mouse_log_sigma, data["data"]["pred"].buttons
+            vis_vid, vis_gt, vis_pred = self.visualize_predictions(video[0],
+                                                          gt_mouse[0], gt_buttons[0], 
+                                                          pred_mouse_mu[0], pred_mouse_log_sigma[0], pred_buttons[0])
+            self.log({ # NOTE take first video in batch
+                "vis/predictions": vis_pred,
+                "vis/groundtruth": vis_gt,
+                "vis/raw": vis_vid,
+            }, flush=True)
+        return data["loss"]["total"]
 
     def after_epoch(self):
         super().after_epoch()
 
-    def _ensure_profiler(self):
-        if hasattr(self, "_prof"):
-            return
+    def visualize_predictions(
+        self,
+        video: torch.Tensor,                     # [T, 3, H, W]  float16/32  (0-1 or 0-255)
+        gt_mouse: torch.Tensor,
+        gt_buttons: torch.Tensor,
+        pred_mouse_mu: torch.Tensor,
+        pred_mouse_log_sigma: torch.Tensor,
+        pred_buttons: torch.Tensor,
+    ) -> tuple[wandb.Video, wandb.Video]:
+        """
+        Render per-frame overlays for both GT and prediction.
 
-        if not self._do_profile:
-            self._prof = None
-            return
+        Returns
+        -------
+        (gt_video, pred_video)  – two independent `wandb.Video` objects.
+        """
+        from owl_idms.utils import draw_frame_groundtruth, draw_frame_predicted
+        import numpy as np
+        import cv2
+        import torch
 
-        logdir = (
-            pathlib.Path(self.save_path)
-            / "tb_profiler"
-            / datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-        )
-        logdir.mkdir(parents=True, exist_ok=True)
+        # ------------------------------------------------------------------ move to CPU
+        video = video.float().cpu()                      # [T, 3, H, W]
+        gt_mouse    = gt_mouse.cpu()    # [T, 2]
+        gt_buttons  = gt_buttons.cpu()  # [T, N_keys]
 
-        self._prof = torch.profiler.profile(
-            activities=[
-                torch.profiler.ProfilerActivity.CPU,
-                torch.profiler.ProfilerActivity.CUDA,
-            ],
-            schedule=torch.profiler.schedule(
-                wait=1,     # skip the very first it. (dataloader warm-up)
-                warmup=1,   # profile but don't record
-                active=3,   # record 3 iterations
-                repeat=1,
-            ),
-            on_trace_ready=torch.profiler.tensorboard_trace_handler(logdir),
-            record_shapes=True,
-            with_stack=False,          # True = bigger trace, includes Python stack
-            profile_memory=True,
-        )
-        print(f"[Profiler] will write chrome traces to {logdir}")
+        pred_mouse_mu  = pred_mouse_mu.detach().cpu()       # [T, 2]
+        pred_mouse_std = pred_mouse_log_sigma.detach().cpu().exp()  # [T, 2]
+        pred_buttons   = pred_buttons.detach().float().cpu()        # [T, N_keys]
+
+        # ------------------------------------------------------------------ iterate frames
+        raw_frames, gt_frames, pred_frames = [], [], []
+        T = video.shape[0]
+        for t in range(T):
+            # 1. tensor ➜ uint8 BGR H×W×3 (OpenCV wants BGR)
+            frame = video[t]
+            if frame.max() <= 1.0:                       # 0-1 range → 0-255
+                frame = frame * 255.0
+            frame_uint8 = (
+                frame.clamp(0, 255)
+                    .to(torch.uint8)
+                    .permute(1, 2, 0)                   # HWC RGB
+                    .numpy()
+            )
+            frame_bgr = frame_uint8[:, :, ::-1].copy()    # RGB → BGR
+
+            # 2. overlays
+            gt_frame = draw_frame_groundtruth(
+                frame_bgr,
+                gt_mouse=gt_mouse[t].tolist(),
+                gt_buttons=gt_buttons[t].bool().tolist(),
+            )
+            pred_frame = draw_frame_predicted(
+                frame_bgr,
+                pred_mean=pred_mouse_mu[t].tolist(),
+                pred_std=pred_mouse_std[t].tolist(),
+                pred_buttons=pred_buttons[t],
+            )
+
+            # 3. back to RGB for WandB
+            gt_frames.append(cv2.cvtColor(gt_frame, cv2.COLOR_BGR2RGB))
+            pred_frames.append(cv2.cvtColor(pred_frame, cv2.COLOR_BGR2RGB))
+            raw_frames.append(cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB))
+        # ------------------------------------------------------------------ stack ➜ wandb.Video
+        raw_frames_np = np.ascontiguousarray(np.stack(raw_frames, axis=0)).astype(np.uint8).transpose(0, 3, 1, 2)
+        gt_frames_np = np.ascontiguousarray(np.stack(gt_frames, axis=0)).astype(np.uint8).transpose(0, 3, 1, 2)
+        pred_frames_np = np.ascontiguousarray(np.stack(pred_frames, axis=0)).astype(np.uint8).transpose(0, 3, 1, 2)
+
+        raw_video  = wandb.Video(raw_frames_np, fps=30, format="mp4")
+        gt_video   = wandb.Video(gt_frames_np,   fps=30, format="mp4")
+        pred_video = wandb.Video(pred_frames_np, fps=30, format="mp4")
+        return raw_video, gt_video, pred_video
+
+
+
+
+    def eval_step(self, batch: dict):
+        with torch.no_grad():
+            loss = self.forward_step(batch)
+            if self.global_idx.item() % self.log_step_frequency == 0:
+                self.log({'val/loss': loss.item()}, flush=True)
+
