@@ -175,3 +175,6 @@ class CombinedOptimizer(Optimizer):
 
 def init_muon(params, rank = 0, world_size = 1, **kwargs):
     return CombinedOptimizer(params, rank, world_size, **kwargs)
+
+def init_adamw(params, rank = 0, world_size = 1, **kwargs):
+    return AdamW(params, rank, world_size, **kwargs)

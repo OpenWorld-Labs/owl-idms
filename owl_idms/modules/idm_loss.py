@@ -4,6 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from owl_idms._types import ActionGroundTruth, ActionPrediction
 from owl_idms.constants import KEYBINDS
+from torchvision.ops import sigmoid_focal_loss
 
 class IDMLoss(nn.Module):
     """
@@ -87,10 +88,47 @@ class IDM_Focal_Loss(nn.Module):
         loss_mouse = self.mouse_loss(pred.mouse_mu, target.mouse, var)
         return loss_keys, loss_mouse * self.mouse_weight
 
+
+# --------------------------------------------------------------------------- #
+# Helper focal & asymmetric losses
+# --------------------------------------------------------------------------- #
+class FocalBCEWithLogits(nn.Module):
+    """Sigmoid focal BCE (Lin et al., γ>0) – supports per-class α."""
+    def __init__(self, gamma: float = 2.0, alpha: Tensor | float | None = None,
+                 reduction: str = "mean"):
+        super().__init__()
+        self.gamma, self.alpha, self.reduction = gamma, alpha, reduction
+    def forward(self, logits: Tensor, target: Tensor) -> Tensor:
+        loss = sigmoid_focal_loss(
+            logits, target, gamma=self.gamma,
+            alpha=self.alpha, reduction=self.reduction  # TV handles None
+        )
+        return loss
+
+class AsymmetricLoss(nn.Module):
+    """Ridnik et al. ICCV-21 – γ_pos≈0, γ_neg≈4, optional prob-clip."""
+    def __init__(self, g_pos=0, g_neg=4, clip=0.05, eps=1e-8,
+                 reduction="mean"):
+        super().__init__()
+        self.g_pos, self.g_neg, self.clip, self.eps, self.reduction = \
+            g_pos, g_neg, clip, eps, reduction
+    def forward(self, logits: Tensor, target: Tensor) -> Tensor:
+        x_sig = torch.sigmoid(logits)
+        xs_pos = torch.clamp(x_sig, self.eps, 1.0 - self.eps)
+        xs_neg = torch.clamp(1.0 - x_sig + self.clip, 0.0, 1.0)
+        loss_pos = target * torch.log(xs_pos) * (1 - xs_pos).pow(self.g_pos)
+        loss_neg = (1 - target) * torch.log(xs_neg) * xs_neg.pow(self.g_neg)
+        loss = -(loss_pos + loss_neg)
+        return loss.mean() if self.reduction == "mean" else loss.sum()
+
+# --------------------------------------------------------------------------- #
+# Main IDM loss
+# --------------------------------------------------------------------------- #
 class BCEMSE_IDM_Loss(nn.Module):
     """
-    BCE-with-logits on button channels + MSE on mouse deltas.
-    The loss is computed on the **centre frame** (t = T//2).
+    Button loss = focal / asymmetric / BCE-with-pos-weight  (choose via kwargs)
+    Mouse  loss = MSE on Δx/Δy.
+    Both computed on centre frame (t = T//2).
     """
 
     def __init__(
@@ -100,16 +138,32 @@ class BCEMSE_IDM_Loss(nn.Module):
         btn_weight: float = 1.0,
         mouse_weight: float = 1.0,
         threshold: float = 0.5,
+        mode: str = "focal",          # 'focal' | 'asymmetric' | 'bce'
+        gamma: float = 2.0,           # focal γ
+        pos_weight: Tensor | None = None,  # for mode='bce'
+        alpha: float | Tensor | None = 0.25,  # focal α (balance factor)
         reduction: str = "mean",
     ) -> None:
         super().__init__()
-        self.n_controls   = n_controls
         self.btn_weight   = btn_weight
         self.mouse_weight = mouse_weight
         self.threshold    = threshold
-        self.reduction    = reduction
 
-        self._btn_loss   = nn.BCEWithLogitsLoss(reduction=reduction)
+        if mode == "focal":
+            self._btn_loss = FocalBCEWithLogits(
+                gamma=gamma, alpha=alpha, reduction=reduction
+            )
+        elif mode == "asymmetric":
+            self._btn_loss = AsymmetricLoss(
+                g_pos=0, g_neg=gamma, reduction=reduction
+            )
+        elif mode == "bce":
+            self._btn_loss = nn.BCEWithLogitsLoss(
+                pos_weight=pos_weight, reduction=reduction
+            )
+        else:
+            raise ValueError(f"Unknown mode '{mode}'")
+
         self._mouse_loss = nn.MSELoss(reduction=reduction)
 
     # ------------------------------------------------------------------ #
@@ -118,44 +172,23 @@ class BCEMSE_IDM_Loss(nn.Module):
         pred:   ActionPrediction,
         target: ActionGroundTruth,
     ) -> tuple[Tensor, dict[str, float]]:
-        btn_pred   = pred.buttons            # [B, N_keys] logits
-        mouse_pred = pred.mouse             # [B, 2]
-
-        btn_gt     = target.buttons.float()  # 0/1
-        mouse_gt   = target.mouse           # [B, 2]
-
-        # -------------------------------------------------------------- #
-        # losses                                                         #
-        # -------------------------------------------------------------- #
-        btn_loss  = self._btn_loss(btn_pred, btn_gt)
-        mse_loss  = self._mouse_loss(mouse_pred, mouse_gt)
+        btn_loss  = self._btn_loss(pred.buttons, target.buttons.float())
+        mse_loss  = self._mouse_loss(pred.mouse,  target.mouse)
         total     = self.btn_weight * btn_loss + self.mouse_weight * mse_loss
 
-        # -------------------------------------------------------------- #
-        # metrics (no-grad)                                              #
-        # -------------------------------------------------------------- #
+        # --------------------------- metrics --------------------------- #
         with torch.no_grad():
-            btn_bin = (torch.sigmoid(btn_pred) > self.threshold).float()
+            btn_bin  = (torch.sigmoid(pred.buttons) > self.threshold).float()
+            btn_acc  = (btn_bin == target.buttons).float().mean()
+            nz_mask  = target.buttons != 0
+            nz_acc   = (btn_bin[nz_mask] == target.buttons[nz_mask]
+                        ).float().mean() if nz_mask.any() else torch.tensor(
+                            float('nan'), device=btn_bin.device)
+            all_zero = (target.buttons.sum(dim=-1) == 0).float().mean()
 
-            btn_acc = (btn_bin == btn_gt).float().mean()
-
-            # “Sensitivity” = accuracy on the non-zero channels
-            nz_mask = btn_gt != 0
-            nz_acc  = (
-                (btn_bin[nz_mask] == btn_gt[nz_mask]).float().mean()
-                if nz_mask.any()
-                else torch.tensor(float("nan"), device=btn_gt.device)
-            )
-
-            all_zero_btn  = (btn_gt.sum(dim=-1) == 0).float().mean()
-
-        metrics = {
-            "total_loss"         : total.item(),
-            "button_loss"        : btn_loss.item(),
-            "mouse_loss"         : mse_loss.item(),
-            "button_accuracy"    : btn_acc.item(),
-            "button_sensitivity" : nz_acc.item(),   # ← original name restored
-            "p(all_zero_buttons)": all_zero_btn.item(),
+        return total, {
+            "total_loss": total.item(), "button_loss": btn_loss.item(),
+            "mouse_loss": mse_loss.item(), "button_accuracy": btn_acc.item(),
+            "button_sensitivity": nz_acc.item(),
+            "p(all_zero_buttons)": all_zero.item(),
         }
-
-        return total, metrics

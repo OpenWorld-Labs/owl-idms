@@ -14,7 +14,7 @@ optim:
 
 logging:
   save_epoch_frequency: 1
-  log_step_frequency: 25
+  log_step_frequency: 1
   log_vis_frequency: 100
   eval_every_n_epochs: 1
   load_path: null
@@ -28,6 +28,18 @@ hardware:
 
 loss:
   _target_: owl_idms.modules.bce_mse_idm_loss
+  mode: focal                     # ← focal BCE (γ & α below)
+  gamma: 2.0                      # focal γ
+  alpha: 0.25                     # focal α (balance factor)
+  # if you want ASL instead:
+  # mode: asymmetric
+  # gamma: 4                      # γ_neg
+  # or: mode: bce, pos_weight: ${paths.pos_weight}
+  btn_weight: 1.0
+  mouse_weight: 1.0
+  reduction: mean
+  threshold: 0.5
+
 
 train_dataloader:
   _target_: owl_idms.data.get_cod_loader
@@ -37,10 +49,9 @@ train_dataloader:
 val_dataloader:
   _target_: owl_idms.data.get_cod_loader
   split: val
-  batch_size: 128
+  batch_size: 64
   num_workers: 6
 
 modules:
   action_predictor:
-    _target_: owl_idms.modules.basic_idm_base
-    n_frames: 32
+    _target_: owl_idms.modules.st_idm
