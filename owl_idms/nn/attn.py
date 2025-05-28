@@ -22,11 +22,22 @@ class Attn(nn.Module):
         self.causal = False
 
     def forward(self, x):
+        # x is [b, n, d]
+        qkv = self.qkv(x) # [b, n, 3*d]
+        
+        # Split into q,k,v and reshape
+        chunk_size = qkv.shape[-1] // 3
+        qkv = qkv.reshape(qkv.shape[0], qkv.shape[1], 3, self.n_heads, -1)
+        qkv = qkv.permute(2, 0, 3, 1, 4) # [3, b, h, n, d]
+        q, k, v = qkv[0], qkv[1], qkv[2]
 
-        q,k,v = eo.rearrange(self.qkv(x), 'b n (three h d) -> three b h n d', three = 3, h = self.n_heads)
-        q,k = self.qk_norm(q,k)
-        x = F.scaled_dot_product_attention(q,k,v,is_causal=self.causal)
-        x = eo.rearrange(x, 'b h n d -> b n (h d)')
+        q, k = self.qk_norm(q, k)
+        x = F.scaled_dot_product_attention(q, k, v, is_causal=self.causal)
+        
+        # Reshape back
+        x = x.permute(0, 2, 1, 3).contiguous() # [b, n, h, d]
+        x = x.reshape(x.shape[0], x.shape[1], -1) # [b, n, h*d]
+        
         x = self.out(x)
         return x
 
