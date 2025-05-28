@@ -75,3 +75,16 @@ class SameBlock(nn.Module):
             x = block(x)
         x = self.proj(x)
         return x
+
+class ConvBlock(nn.Module):
+    def __init__(self, ch_in, ch_out):
+        super().__init__()
+        self.conv = nn.Conv3d(ch_in, ch_out, 3, 1, 1, bias=False)
+        self.norm = RMSNorm3d(ch_out)
+        self.act = nn.LeakyReLU(inplace=True)
+        
+    def forward(self, x):
+        x = self.conv(x)
+        x = self.norm(x)
+        x = self.act(x)
+        return x

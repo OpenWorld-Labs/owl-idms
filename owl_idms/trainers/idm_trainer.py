@@ -7,42 +7,43 @@ import torch
 import torch.nn.functional as F
 import wandb
 from ema_pytorch import EMA
+import numpy as np
 from torch.nn.parallel import DistributedDataParallel as DDP
+import math
 
 from ..data import get_loader
 from ..models import get_model_cls
 from ..muon import init_muon
 from ..schedulers import get_scheduler_cls
 from ..utils import Timer
+from ..utils.logging import LogHelper
 from .base import BaseTrainer
 
-def latent_reg_loss(z):
-    # z is [b,c,h,w]
-    loss = z.pow(2)
-    loss = eo.reduce(loss, 'b ... -> b', reduction = 'sum').mean()
-    return 0.5 * loss
-
 def rescale_mouse(mouse):
-    # mouse is [b,n,2]
-    # Get magnitude of mouse movement vectors
-    mag = torch.norm(mouse, dim=-1, keepdim=True) # [b,n,1]
-    # Get direction of vectors
-    direction = mouse / (mag + 1e-8) # [b,n,2]
-    # Apply log1p to magnitudes
-    scaled_mag = torch.log1p(mag) # [b,n,1]
-    # Scale direction vectors by new magnitudes
-    return direction * scaled_mag # [b,n,2]
+    # mouse is [b,2]
+    # Apply symlog to each component
+    # symlog(x) = sign(x) * log(1 + |x|)
+    return torch.sign(mouse) * torch.log1p(torch.abs(mouse)) # [b,2]
 
 def unscale_mouse(mouse):
-    # mouse is [b,n,2]
-    # Get magnitude of mouse movement vectors
-    mag = torch.norm(mouse, dim=-1, keepdim=True) # [b,n,1]
-    # Get direction of vectors 
-    direction = mouse / (mag + 1e-8) # [b,n,2]
-    # Apply expm1 to magnitudes (inverse of log1p)
-    unscaled_mag = torch.expm1(mag) # [b,n,1]
-    # Scale direction vectors by new magnitudes
-    return direction * unscaled_mag # [b,n,2]
+    # mouse is [b,2]
+    # Apply inverse of symlog to each component
+    # symlog^-1(x) = sign(x) * (exp(|x|) - 1)
+    return torch.sign(mouse) * torch.expm1(torch.abs(mouse)) # [b,2]
+
+def gaussian_nll_loss(mouse_true, pred_mouse_mu, pred_mouse_logvar):
+    # mouse_true: true dx, dy movements [batch, 2]
+    # pred_mouse_mu: predicted mean dx, dy [batch, 2]  
+    # pred_mouse_logvar: predicted log variance dx, dy [batch, 2]
+
+    pred_mouse_var = torch.exp(pred_mouse_logvar)
+    
+    nll = 0.5 * (math.log(2 * torch.pi) + 
+                 pred_mouse_logvar +
+                 torch.square(mouse_true - pred_mouse_mu) / pred_mouse_var)
+    
+    # Sum across dx,dy dimensions (dim=1) then take mean across batch
+    return torch.mean(torch.sum(nll, dim=1))
 
 class IDMTrainer(BaseTrainer):
     """
@@ -135,6 +136,7 @@ class IDMTrainer(BaseTrainer):
 
         # Dataset setup
         loader = get_loader(self.train_cfg.data_id, self.train_cfg.batch_size)
+        logger = LogHelper()
 
         local_step = 0
         for _ in range(self.train_cfg.epochs):
@@ -142,16 +144,22 @@ class IDMTrainer(BaseTrainer):
                 # Move data to device
                 videos = videos.cuda().bfloat16()
                 button_target = button_input.cuda()[:,16]
-                mouse_target = rescale_mouse(mouse_input.cuda())[:,16]
+                mouse_target = mouse_input.float().cuda()[:,16]
+                mouse_target = rescale_mouse(mouse_target)
 
                 with ctx:
                     # Forward pass
-                    mouse_pred, button_logits = self.model(videos)
+                    (m_mu_preds, m_logvar_preds), button_logits = self.model(videos)
 
-                    mouse_loss = F.mse_loss(mouse_target, mouse_pred) / accum_steps
+                    # Gaussian NLL loss
+                    mouse_loss = gaussian_nll_loss(mouse_target, m_mu_preds, m_logvar_preds) / accum_steps
                     button_loss = F.binary_cross_entropy_with_logits(button_logits, button_target.float()) / accum_steps
 
-                    total_loss = mouse_loss + button_loss
+                    total_loss = 0.0*mouse_loss + button_loss
+
+                    logger.log('mouse_loss', mouse_loss)
+                    logger.log('button_loss', button_loss)
+                    logger.log('total_loss', total_loss)
 
                 # Calculate sensitivity (true positive rate) for buttons
                 with torch.no_grad():
@@ -159,6 +167,7 @@ class IDMTrainer(BaseTrainer):
                     true_positives = (button_preds * button_target).sum()
                     total_positives = button_target.sum()
                     sensitivity = true_positives / (total_positives + 1e-8)  # Avoid div by 0
+                    logger.log('button_sensitivity', sensitivity/accum_steps)
 
                 self.scaler.scale(total_loss).backward()
 
@@ -177,14 +186,10 @@ class IDMTrainer(BaseTrainer):
                         self.scheduler.step()
                     self.ema.update()
 
-                    # Log metrics to wandb
-                    wandb.log({
-                        "mouse_loss": mouse_loss.item() * accum_steps,
-                        "button_loss": button_loss.item() * accum_steps,
-                        "total_loss": total_loss.item() * accum_steps,
-                        "button_sensitivity": sensitivity.item(),
-                        "time_per_step": timer.get_time()
-                    }, step=self.total_step_counter)
+                    # Get reduced metrics and log to wandb
+                    metrics = logger.pop()
+                    metrics['time_per_step'] = timer.hit()
+                    wandb.log(metrics, step=self.total_step_counter)
                     timer.reset()
 
                     self.total_step_counter += 1
