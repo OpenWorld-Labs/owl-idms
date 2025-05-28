@@ -33,7 +33,6 @@ def _draw_frame(
     *,
     mouse_vec: Tuple[float, float] | None = None,
     mouse_std: Tuple[float, float] | None = None,
-    buttons: Sequence[bool] | None = None,
     color: Tuple[int, int, int] = (0, 255, 0),
     thickness: int = 2,
     resize_to: int | None = 512,  # upscale target (None ➜ no scaling)
@@ -45,7 +44,6 @@ def _draw_frame(
     frame      : RGB/BGR uint8 image, shape *(H, W, 3)*.
     mouse_vec  : (Δx, Δy) in pixels — drawn as an arrow from the image centre.
     mouse_std  : (σx, σy) optional — 1‑σ ellipse centred on the same origin.
-    buttons    : iterable[bool] — HUD row (label = keybind).
     color      : BGR triplet for drawing primitives.
     thickness  : line/ellipse thickness.
     resize_to  : final square resolution; if ``None`` keeps original size.
@@ -129,114 +127,6 @@ def _draw_frame(
         # Colored ellipse
         cv2.ellipse(out, centre, axes, 0, 0, 360, color, thickness, cv2.LINE_AA)
 
-    # ------------------------------------------------------------------ HUD at bottom
-    if buttons is not None:
-        n_keys = len(buttons)
-        
-        # Font settings for crisp text
-        font = cv2.FONT_HERSHEY_SIMPLEX
-        font_scale = 0.6 if w >= 512 else 0.5
-        font_thickness = 2
-        
-        # Two-row layout for many keybinds
-        if n_keys > 6:
-            # Split into two rows
-            first_row = n_keys // 2 + n_keys % 2  # ceiling division
-            second_row = n_keys - first_row
-            
-            # Position at bottom
-            row_height = 30
-            y_positions = [h - row_height * 2 - 10, h - row_height - 10]
-            margin = 15
-            
-            for i, pressed in enumerate(buttons):
-                label = KEYBINDS[i] if i < len(KEYBINDS) else str(i)
-                col = color if pressed else (150, 150, 150)
-                
-                # Determine row and position
-                if i < first_row:
-                    row = 0
-                    row_idx = i
-                    keys_in_row = first_row
-                else:
-                    row = 1
-                    row_idx = i - first_row
-                    keys_in_row = second_row
-                
-                # Calculate x position with better spacing
-                available_width = w - 2 * margin
-                step_x = available_width // keys_in_row
-                x = margin + row_idx * step_x + step_x // 2  # center in cell
-                
-                # Get text size to center it
-                (text_w, text_h), _ = cv2.getTextSize(
-                    label, font, font_scale, font_thickness
-                )
-                x -= text_w // 2  # center text
-                
-                # Draw background rectangle for better visibility
-                padding = 6
-                if pressed:
-                    cv2.rectangle(
-                        out, 
-                        (x - padding, y_positions[row] - text_h - padding),
-                        (x + text_w + padding, y_positions[row] + padding - 2),
-                        (60, 60, 60), -1
-                    )
-                else:
-                    # Subtle background for unpressed keys too
-                    cv2.rectangle(
-                        out, 
-                        (x - padding, y_positions[row] - text_h - padding),
-                        (x + text_w + padding, y_positions[row] + padding - 2),
-                        (30, 30, 30), -1
-                    )
-                
-                # Draw text
-                cv2.putText(
-                    out, label, (x, y_positions[row]),
-                    font, font_scale, col, font_thickness, cv2.LINE_AA,
-                )
-        else:
-            # Single row for few keybinds
-            y0 = h - 25  # bottom position
-            margin = 15
-            available_width = w - 2 * margin
-            step_x = available_width // max(n_keys, 1)
-            
-            for i, pressed in enumerate(buttons):
-                label = KEYBINDS[i] if i < len(KEYBINDS) else str(i)
-                col = color if pressed else (150, 150, 150)
-                x = margin + i * step_x + step_x // 2
-                
-                # Get text size to center it
-                (text_w, text_h), _ = cv2.getTextSize(
-                    label, font, font_scale, font_thickness
-                )
-                x -= text_w // 2
-                
-                # Draw background
-                padding = 6
-                if pressed:
-                    cv2.rectangle(
-                        out, 
-                        (x - padding, y0 - text_h - padding),
-                        (x + text_w + padding, y0 + padding - 2),
-                        (60, 60, 60), -1
-                    )
-                else:
-                    cv2.rectangle(
-                        out, 
-                        (x - padding, y0 - text_h - padding),
-                        (x + text_w + padding, y0 + padding - 2),
-                        (30, 30, 30), -1
-                    )
-                
-                cv2.putText(
-                    out, label, (x, y0),
-                    font, font_scale, col, font_thickness, cv2.LINE_AA,
-                )
-
     return out
 
 # -----------------------------------------------------------------------------
@@ -247,14 +137,12 @@ def draw_frame_groundtruth(
     frame: np.ndarray,
     *,
     gt_mouse: Tuple[float, float],
-    gt_buttons: Sequence[bool] | np.ndarray,
     resize_to: int | None = 512,
 ) -> np.ndarray:
     """Overlay ground‑truth mouse movement and button presses (green)."""
     return _draw_frame(
         frame,
         mouse_vec=gt_mouse,
-        buttons=list(gt_buttons),
         color=(0, 255, 0),
         resize_to=resize_to,
     )
@@ -263,20 +151,13 @@ def draw_frame_predicted_new(
     frame: np.ndarray,
     *,
     pred_mouse: Tuple[float, float],
-    pred_buttons: Sequence[float] | np.ndarray,  # logits or probs
-    threshold: float = 0.5,
     resize_to: int | None = 512,
 ) -> np.ndarray:
     """Overlay model prediction (red arrow + optional 1‑σ ellipse)."""
-    prob = np.asarray(pred_buttons, dtype=np.float32)
-    if prob.ndim == 0:
-        prob = prob[None]
-    pressed = prob >= threshold
 
     return _draw_frame(
         frame,
         mouse_vec=pred_mouse,
-        buttons=pressed.tolist(),
         color=(0, 0, 255),
         resize_to=resize_to,
     )
@@ -286,25 +167,24 @@ def draw_frame_predicted(
     *,
     pred_mean: Tuple[float, float],
     pred_std: Tuple[float, float] | None = None,
-    pred_buttons: Sequence[float] | np.ndarray,  # logits or probs
-    threshold: float = 0.5,
     resize_to: int | None = 512,
 ) -> np.ndarray:
     """Overlay model prediction (red arrow + optional 1‑σ ellipse)."""
-    prob = np.asarray(pred_buttons, dtype=np.float32)
-    if prob.ndim == 0:
-        prob = prob[None]
-    pressed = prob >= threshold
-
-    return _draw_frame(
-        frame,
-        mouse_vec=pred_mean,
-        mouse_std=pred_std,
-        buttons=pressed.tolist(),
-        color=(0, 0, 255),
-        resize_to=resize_to,
-    )
-
+    if pred_std is not None:
+        return _draw_frame(
+            frame,
+            mouse_vec=pred_mean,
+            mouse_std=pred_std,
+            color=(0, 0, 255),
+            resize_to=resize_to,
+        )
+    else:
+        return _draw_frame(
+            frame,
+            mouse_vec=pred_mean,
+            color=(0, 0, 255),
+            resize_to=resize_to,
+        )
 # -----------------------------------------------------------------------------
 # Video helper
 # -----------------------------------------------------------------------------

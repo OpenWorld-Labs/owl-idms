@@ -137,7 +137,7 @@ def get_loader(batch_size: int, split: Literal["train", "val"] = "train",
         persistent_workers=False, # TODO 
         # persistent_workers=True if dl_kwargs.get("num_workers", 0) > 0 else False,
         collate_fn=collate_fn,
-        # prefetch_factor=12,
+        prefetch_factor=24,
         **dl_kwargs,
     )
 

@@ -209,7 +209,6 @@ class STInverseDynamics(nn.Module):
         self.backbone = STBackbone(depth, d_model, num_heads)
 
         # 5. Heads
-        self.btn_head  = nn.Sequential(nn.LayerNorm(d_model), nn.Linear(d_model, n_keys))
         self.mouse_head = nn.Sequential(nn.LayerNorm(d_model), nn.Linear(d_model, 2))
 
     # ------------------------------------------------------------------
@@ -238,10 +237,8 @@ class STInverseDynamics(nn.Module):
         # use centre-frame CLS tokens
         centre = T // 2
         mouse_tok = x[:, centre, 0, :]    # [B,C]
-        btn_tok   = x[:, centre, 1, :]    # [B,C]
 
         return ActionPrediction(
-            buttons=self.btn_head(btn_tok),   # [B,N_keys] logits
             mouse=self.mouse_head(mouse_tok), # [B,2]      Δx/Δy
         )
 

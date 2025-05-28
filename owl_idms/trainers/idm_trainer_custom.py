@@ -22,9 +22,9 @@ class IDMTrainer(BaseTrainer):
                  logging_config: LoggingConfig):
         super().__init__(train_dataloader, val_dataloader, modules, loss, hardware, optim_config, logging_config)
 
-    def _compute_loss(self, video, buttons, mouse):
+    def _compute_loss(self, video, mouse):
         pred: ActionPrediction = self._modules['action_predictor'](video)
-        gt = ActionGroundTruth(buttons=buttons, mouse=mouse)        
+        gt = ActionGroundTruth(mouse=mouse)        
         total_loss, metrics = self.loss(pred, gt)
         return {
             "loss": total_loss,
@@ -44,25 +44,24 @@ class IDMTrainer(BaseTrainer):
         video = (video - video.min()) / (video.max() - video.min())
 
         mouse   = mouse.to(device, non_blocking=True)
-        buttons = buttons.to(device, non_blocking=True)
         # only predict action for the middle frame
         mid = T // 2
         mouse = mouse[:, mid]
-        buttons = buttons[:, mid]
+
 
         video = video.to(dtype=torch.bfloat16)
-        data = self._compute_loss(video, buttons, mouse)
+        data = self._compute_loss(video, mouse)
         
         if self.global_idx.item() % self.log_step_frequency == 0:
             self.log({f'train/{k}': v for k, v in data["metrics"].items()}, flush=False)
             self.log({'train/loss': data["loss"]}, flush=True)
 
         if self.global_idx.item() % self.log_vis_frequency == 0:
-            gt_mouse, gt_buttons = data["data"]["gt"].mouse, data["data"]["gt"].buttons
-            pred_mouse, pred_buttons = data["data"]["pred"].mouse, data["data"]["pred"].buttons
+            gt_mouse = data["data"]["gt"].mouse
+            pred_mouse = data["data"]["pred"].mouse
             vis_vid, vis_gt, vis_pred = self.visualize_predictions(video[0],
-                                                          gt_mouse[0], gt_buttons[0], 
-                                                          pred_mouse[0], pred_buttons[0])
+                                                          gt_mouse[0], 
+                                                          pred_mouse[0])
             self.log({ # NOTE take first video in batch
                 "vis/predictions": vis_pred,
                 "vis/groundtruth": vis_gt,
@@ -77,9 +76,7 @@ class IDMTrainer(BaseTrainer):
         self,
         video: torch.Tensor,                     # [T, 3, H, W]  float16/32  (0-1 or 0-255)
         gt_mouse: torch.Tensor,
-        gt_buttons: torch.Tensor,
         pred_mouse: torch.Tensor,
-        pred_buttons: torch.Tensor,
     ) -> tuple[wandb.Video, wandb.Video]:
         """
         Render per-frame overlays for both GT and prediction.
@@ -96,10 +93,8 @@ class IDMTrainer(BaseTrainer):
         # ------------------------------------------------------------------ move to CPU
         video = video.float().cpu()                      # [T, 3, H, W]
         gt_mouse    = gt_mouse.cpu()    # [T, 2]
-        gt_buttons  = gt_buttons.cpu()  # [T, N_keys]
 
         pred_mouse  = pred_mouse.detach().cpu()       # [T, 2]
-        pred_buttons   = pred_buttons.detach().float().cpu()        # [T, N_keys]
 
         # ------------------------------------------------------------------ iterate frames
         raw_frames, gt_frames, pred_frames = [], [], []
@@ -121,12 +116,10 @@ class IDMTrainer(BaseTrainer):
             gt_frame = draw_frame_groundtruth(
                 frame_bgr,
                 gt_mouse=gt_mouse.tolist(),
-                gt_buttons=gt_buttons.bool().tolist(),
             )
             pred_frame = draw_frame_predicted_new(
                 frame_bgr,
                 pred_mouse=pred_mouse.tolist(),
-                pred_buttons=pred_buttons,
             )
 
             # 3. back to RGB for WandB

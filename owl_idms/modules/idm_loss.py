@@ -124,46 +124,20 @@ class AsymmetricLoss(nn.Module):
 # --------------------------------------------------------------------------- #
 # Main IDM loss
 # --------------------------------------------------------------------------- #
-class BCEMSE_IDM_Loss(nn.Module):
+class Mouse_Loss(nn.Module):
     """
-    Button loss = focal / asymmetric / BCE-with-pos-weight  (choose via kwargs)
     Mouse  loss = MSE on Δx/Δy.
     Both computed on centre frame (t = T//2).
     """
-
+    # just mse for now after removing all button stuff
     def __init__(
         self,
         *,
-        n_controls: int = len(KEYBINDS),
-        btn_weight: float = 1.0,
         mouse_weight: float = 1.0,
-        threshold: float = 0.5,
-        mode: str = "focal",          # 'focal' | 'asymmetric' | 'bce'
-        gamma: float = 2.0,           # focal γ
-        pos_weight: Tensor | None = None,  # for mode='bce'
-        alpha: float | Tensor | None = 0.25,  # focal α (balance factor)
         reduction: str = "mean",
     ) -> None:
         super().__init__()
-        self.btn_weight   = btn_weight
         self.mouse_weight = mouse_weight
-        self.threshold    = threshold
-
-        if mode == "focal":
-            self._btn_loss = FocalBCEWithLogits(
-                gamma=gamma, alpha=alpha, reduction=reduction
-            )
-        elif mode == "asymmetric":
-            self._btn_loss = AsymmetricLoss(
-                g_pos=0, g_neg=gamma, reduction=reduction
-            )
-        elif mode == "bce":
-            self._btn_loss = nn.BCEWithLogitsLoss(
-                pos_weight=pos_weight, reduction=reduction
-            )
-        else:
-            raise ValueError(f"Unknown mode '{mode}'")
-
         self._mouse_loss = nn.MSELoss(reduction=reduction)
 
     # ------------------------------------------------------------------ #
@@ -172,23 +146,9 @@ class BCEMSE_IDM_Loss(nn.Module):
         pred:   ActionPrediction,
         target: ActionGroundTruth,
     ) -> tuple[Tensor, dict[str, float]]:
-        btn_loss  = self._btn_loss(pred.buttons, target.buttons.float())
         mse_loss  = self._mouse_loss(pred.mouse,  target.mouse)
-        total     = self.btn_weight * btn_loss + self.mouse_weight * mse_loss
 
-        # --------------------------- metrics --------------------------- #
-        with torch.no_grad():
-            btn_bin  = (torch.sigmoid(pred.buttons) > self.threshold).float()
-            btn_acc  = (btn_bin == target.buttons).float().mean()
-            nz_mask  = target.buttons != 0
-            nz_acc   = (btn_bin[nz_mask] == target.buttons[nz_mask]
-                        ).float().mean() if nz_mask.any() else torch.tensor(
-                            float('nan'), device=btn_bin.device)
-            all_zero = (target.buttons.sum(dim=-1) == 0).float().mean()
-
-        return total, {
-            "total_loss": total.item(), "button_loss": btn_loss.item(),
-            "mouse_loss": mse_loss.item(), "button_accuracy": btn_acc.item(),
-            "button_sensitivity": nz_acc.item(),
-            "p(all_zero_buttons)": all_zero.item(),
+        return mse_loss, {
+            "total_loss": mse_loss.item(),
+            "mouse_loss": mse_loss.item(),
         }
