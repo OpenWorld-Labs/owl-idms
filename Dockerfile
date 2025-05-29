@@ -42,8 +42,8 @@ RUN uv pip install --system \
     imageio \
     wandb \
     tqdm \
-    omegaconf
-
+    omegaconf \
+    moviepy
 
 COPY . /app
 
