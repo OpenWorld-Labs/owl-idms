@@ -12,25 +12,10 @@
 
 ## Installation
 
-We recommend using [uv](https://github.com/astral-sh/uv) for installing dependencies. Follow these steps to set up your environment:
-
-1. Install uv:
-```bash
-pip install uv
-```
-
-2. Install PyTorch with CUDA 12.8 support:
+Tested with PyTorch on Cuda 12.8
 ```bash
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
-```
-
-3. Install project dependencies:
-```bash
-uv pip install -r requirements.txt
-```
-Note: For production, it's recommended to generate a fresh lock file on the target system:
-```bash
-uv pip compile --output-file requirements-lock.txt requirements.txt
+pip install -r requirements.txt
 ```
 
 ## Training
