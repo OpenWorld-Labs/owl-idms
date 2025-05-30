@@ -90,5 +90,3 @@ For inference examples, see `inference/get_sample.py` which demonstrates how to:
 Download the pre-trained checkpoint (trained with `configs/basic_adamw.yml`):
 - **Model**: [17k_ema_idm.pt](https://drive.google.com/file/d/1slWeZRtK7JnTdgJxY860WWnnrEFOBGib/view?usp=sharing)
 - **Configuration**: `configs/basic_adamw.yml`
-
-## Basic Information
