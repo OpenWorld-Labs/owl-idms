@@ -90,3 +90,13 @@ For inference examples, see `inference/get_sample.py` which demonstrates how to:
 Download the pre-trained checkpoint (trained with `configs/basic_adamw.yml`):
 - **Model**: [17k_ema_idm.pt](https://model-checkpoints.fly.storage.tigris.dev/17k_ema_idm.pt) (30MB)
 - **Configuration**: `configs/basic_adamw.yml`
+
+### Samples
+
+Here are some samples from the pre-trained model:
+
+**Call of Duty: Zombies**
+![Zombies Sample](media/samples_zombies.gif)
+
+**Halo Infinite**
+![Halo Sample](media/samples_halo.gif)
