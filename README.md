@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🦉 OWL VAEs
+# 🦉 OWL IDMs
 
 <p align="center">
   This is our codebase for IDM training
