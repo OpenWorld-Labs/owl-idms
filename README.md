@@ -93,10 +93,12 @@ Download the pre-trained checkpoint (trained with `configs/basic_adamw.yml`):
 
 ### Samples
 
-Here are some samples from the pre-trained model:
+Here are some samples from the pre-trained model:  
 
-**Call of Duty: Zombies**
-![Zombies Sample](media/samples_zombies.gif)
+**Call of Duty: Zombies**  
 
-**Halo Infinite**
+![Zombies Sample](media/samples_zombies.gif)  
+
+**Halo Infinite**  
+
 ![Halo Sample](media/samples_halo.gif)
