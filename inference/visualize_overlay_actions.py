@@ -79,6 +79,20 @@ def _rescale_icons(ratio: float):
             globals()[key] = value
 
 
+def _standardize_video(video: torch.Tensor) -> torch.Tensor:
+    """
+    Convert video to 0-255 and permute channels to (T, H, W, C).
+    """
+    video = video.float()
+    video = (video - video.min()) / (video.max() - video.min())
+    video = (video * 255).cpu().to(dtype=torch.uint8)
+    
+    # convert channels
+    if video.shape[1] == 3:
+        video = video.permute(0, 2, 3, 1) # need to be [n,h,w,c]
+    return video
+
+
 def _draw_buttons(
     frame: np.ndarray,
     button_sequence: list[bool],
@@ -333,22 +347,6 @@ def _draw_video(
     return frames
 
 
-def _standardize_video(video: torch.Tensor) -> torch.Tensor:
-    # convert video from 0-1 to 0-255
-    assert video.dtype in [torch.float32, torch.float16, torch.bfloat16, torch.uint8]
-    # normalize to 0-1 regardless of dtype
-    video = (video - video.min()) / (video.max() - video.min())
-    if video.dtype in [torch.float32, torch.float16, torch.bfloat16]:        
-        video = (video * 255).cpu().to(dtype=torch.uint8)
-    else:
-        video = video.cpu().to(dtype=torch.uint8)
-    
-    # convert channels
-    if video.shape[1] == 3:
-        video = video.permute(0, 2, 3, 1) # need to be [n,h,w,c]
-    return video
-
-
 def overlay_infer_actions(
     model_path: str    = DEFAULT_MODEL_PATH,
     cfg_path:   str    = DEFAULT_CFG_PATH,
@@ -363,6 +361,7 @@ def overlay_infer_actions(
     fps: int                          = 30,
     arrow_scale_factor: Optional[float] = None,
     arrow_max_scale: Optional[float]    = None,
+    device: str                       = 'cuda',
 ) -> list[np.ndarray]:
     """
     Run inference on a single video and overlay predicted mouse & button actions.
@@ -374,16 +373,16 @@ def overlay_infer_actions(
     Args:
         model_path:       Path to the IDM checkpoint (.pt).
         cfg_path:         Path to the model YAML config.
+        video_pt_path:    Path to a video tensor (.pt). Overrides `dataset`.
+        video:            A video tensor (T, C, H, W) to run inference on. Overrides `video_pt_path`.
+        video_display:    A video tensor (T, C, H, W) of the video to display. Overrides `video`.
         dataset:          Optional dataset instance (must have `.paths`).
         dataset_index:    Which entry of `dataset.paths` to use.
-        video_pt_path:    Path to a video tensor (.pt). Overrides `dataset`.
-        mouse_pt_path:    Path to a mouse tensor (.pt) [unused by inference].
-        buttons_pt_path:  Path to a buttons tensor (.pt) [unused by inference].
         save_path:        Where to write the output .mp4 (if not None).
         fps:              Frame rate for the output video.
         arrow_scale_factor:  Override for arrow length scaling.
-        arrow_max_scale:     Override for max arrow‐to‐compass scale.
-
+        arrow_max_scale:     Override for max arrow-to-compass scale.
+        device:             Device to run inference on.
     Returns:
         A list of annotated frames (as H×W×3 uint8 numpy arrays).
     """
@@ -428,7 +427,7 @@ def overlay_infer_actions(
     # -------------------------------------------------------------------------
     # 3. Load the model and infer actions
     # -------------------------------------------------------------------------
-    model = load_model(model_path, cfg_path, device='cpu')
+    model = load_model(model_path, cfg_path, device=device)
     # model inference expects (T, C, H, W) but drawing expects (T, H, W, C). we standardize to the latter but permute for the former
     frames, buttons, mouse_vec, mouse_std = infer_actions(model, video.permute(0,3,1,2), window_size=WINDOW_SIZE) 
     display_frames = _standardize_video(frames)
@@ -455,7 +454,7 @@ def overlay_infer_actions(
 
 
 if __name__ == "__main__":
-    mp4_path = '/home/sami/owl_idms/inference/sample.mp4'
+    mp4_path = '/home/sami/owl_idms/inference/trimmed.mp4'
     # downsample entire video to 1x1 at 128x128, one by one, using PIL, into a list
     frames = []
 
@@ -470,7 +469,13 @@ if __name__ == "__main__":
     model_frames = torch.stack(model_frames)
     print(model_frames.shape)
 
-    overlay_infer_actions(video=model_frames, video_display=hd_frames)
+    overlay_infer_actions(
+        model_path='/home/sami/owl_idms/checkpoints/v0/step_31500.pt',
+        cfg_path='/home/sami/owl_idms/inference/stformer.yml',
+        use_dataset=True,
+        dataset=CoDDataset(),
+        dataset_index=0,
+    )
 
 # # Example usage
 # if __name__ == "__main__":
