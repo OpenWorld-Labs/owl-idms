@@ -1,1 +1,10 @@
 einops
+numpy
+omegaconf
+pyyaml
+tqdm
+ema-pytorch
+opencv-python
+moviepy
+imageio
+wandb
