@@ -23,28 +23,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN ln -sf /usr/bin/python3.10 /usr/bin/python3 && \
     ln -sf /usr/bin/python3 /usr/bin/python
 
-# Install uv
-RUN curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/root/.cargo/bin sh
-ENV PATH="/root/.cargo/bin:${PATH}"
-
 # Create working directory
 WORKDIR /app
 
 # Install PyTorch with CUDA 12.8 support
-RUN uv pip install --system torch torchvision --index-url https://download.pytorch.org/whl/cu128
+RUN pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
 
 # Install other requirements
-RUN uv pip install --system \
-    einops \
-    ema-pytorch \
-    numpy \
-    opencv-python \
-    imageio \
-    wandb \
-    tqdm \
-    omegaconf \
-    moviepy
-
+RUN pip install -r requirements.txt
 COPY . /app
 
 # Set the default command
