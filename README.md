@@ -88,5 +88,5 @@ For inference examples, see `inference/get_sample.py` which demonstrates how to:
 ### Pre-trained Model
 
 Download the pre-trained checkpoint (trained with `configs/basic_adamw.yml`):
-- **Model**: [17k_ema_idm.pt](https://drive.google.com/file/d/1slWeZRtK7JnTdgJxY860WWnnrEFOBGib/view?usp=sharing)
+- **Model**: [17k_ema_idm.pt](https://model-checkpoints.fly.storage.tigris.dev/17k_ema_idm.pt) (30MB)
 - **Configuration**: `configs/basic_adamw.yml`
