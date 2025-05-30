@@ -1,0 +1,90 @@
+version = 1
+revision = 1
+requires-python = ">=3.10"
+
+[[package]]
+name = "einops"
+version = "0.8.1"
+source = { registry = "https://pypi.org/simple" }
+
+[[package]]
+name = "numpy"
+version = "2.2.6"
+source = { registry = "https://pypi.org/simple" }
+
+[[package]]
+name = "omegaconf"
+version = "2.3.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "antlr4-python3-runtime", version = ">=4.9.0" },
+    { name = "pyyaml", version = ">=5.1.0" }
+]
+
+[[package]]
+name = "pyyaml"
+version = "6.0.2"
+source = { registry = "https://pypi.org/simple" }
+
+[[package]]
+name = "tqdm"
+version = "4.67.1"
+source = { registry = "https://pypi.org/simple" }
+
+[[package]]
+name = "ema-pytorch"
+version = "0.7.7"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "torch" }
+]
+
+[[package]]
+name = "opencv-python"
+version = "4.11.0.86"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" }
+]
+
+[[package]]
+name = "moviepy"
+version = "2.2.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "decorator", version = ">=4.0.2" },
+    { name = "imageio", version = ">=2.5" },
+    { name = "imageio-ffmpeg", version = ">=0.2.0" },
+    { name = "numpy" },
+    { name = "proglog", version = ">=0.1.9" },
+    { name = "requests" },
+    { name = "tqdm" }
+]
+
+[[package]]
+name = "imageio"
+version = "2.37.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+    { name = "pillow" }
+]
+
+[[package]]
+name = "wandb"
+version = "0.19.11"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "click", version = ">=7.0" },
+    { name = "docker-pycreds", version = ">=0.4.0" },
+    { name = "gitpython", version = ">=1.0.0" },
+    { name = "psutil", version = ">=5.0.0" },
+    { name = "pyyaml" },
+    { name = "requests", version = ">=2.0.0" },
+    { name = "sentry-sdk", version = ">=1.0.0" },
+    { name = "setproctitle" },
+    { name = "setuptools" }
+]
+
+
+

@@ -12,25 +12,51 @@
 
 ## Installation
 
-We recommend using [uv](https://github.com/astral-sh/uv) for installing dependencies. Follow these steps to set up your environment:
+### Option 1: Docker (Recommended)
+
+The easiest way to get started is using Docker with CUDA support:
+
+```bash
+# Build the Docker image
+docker build -t owl-idms .
+
+# Run with GPU support (requires nvidia-docker)
+docker run --gpus all -it -v $(pwd):/app owl-idms
+
+# For training with data mounted
+docker run --gpus all -it -v $(pwd):/app -v /path/to/your/data:/data owl-idms
+```
+
+### Option 2: Local Installation with uv
+
+We recommend using [uv](https://github.com/astral-sh/uv) for local development:
 
 1. Install uv:
 ```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+# or
 pip install uv
 ```
 
-2. Install PyTorch with CUDA 12.8 support:
+2. Install dependencies using the lock file:
 ```bash
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+uv sync
 ```
 
-3. Install project dependencies:
+3. Activate the virtual environment:
 ```bash
-uv pip install -r requirements.txt
+source .venv/bin/activate  # On Linux/macOS
+# or
+.venv\Scripts\activate     # On Windows
 ```
-Note: For production, it's recommended to generate a fresh lock file on the target system:
+
+**Alternative**: Install without virtual environment:
 ```bash
-uv pip compile --output-file requirements-lock.txt requirements.txt
+# Install PyTorch with CUDA 12.8 support
+uv pip install --system torch torchvision --index-url https://download.pytorch.org/whl/cu128
+
+# Install other dependencies
+uv pip install --system -r requirements.txt
 ```
 
 ## Training
