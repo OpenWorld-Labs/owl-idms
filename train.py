@@ -8,7 +8,7 @@ from owl_idms.utils.ddp import cleanup, setup
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--config_path", type=str, help="Path to config YAML file")
+    parser.add_argument("--config_path", type=str, help="Path to config YAML file", default='configs/basic.yml')
 
     args = parser.parse_args()
 

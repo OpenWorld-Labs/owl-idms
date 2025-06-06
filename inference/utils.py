@@ -5,8 +5,8 @@ from owl_idms.models import get_model_cls
 # -----------------------------------------------------------------------------
 # Defaults for model loading
 # -----------------------------------------------------------------------------
-DEFAULT_MODEL_PATH = '/home/sami/owl_idms/inference/17k_ema_idm.pt'
-DEFAULT_CFG_PATH   = '/home/sami/owl_idms/inference/shab.yml'
+DEFAULT_MODEL_PATH = '17k_ema_idm.pt'
+DEFAULT_CFG_PATH   = 'configs/basic_adamw.yml'
 WINDOW_SIZE = 32
 
 def infer_actions(
@@ -22,7 +22,7 @@ def infer_actions(
         model: a PyTorch model that takes input of shape
                (B, window_size, C, H, W) and returns
                ((m_mu_preds, m_logvar_preds), button_logits),
-               where each prediction tensor has time‐dim ≥ window_size+1.
+               where each prediction tensor has time-dim ≥ window_size+1.
         video: tensor of shape (T, C, H, W)
         window_size: number of frames per window
         batch_size: how many windows to process at once

@@ -1,10 +1,13 @@
+ema-pytorch
+torch
 einops
 numpy
+opencv-python
+imageio
+wandb
+tqdm
 omegaconf
 pyyaml
 tqdm
 ema-pytorch
-opencv-python
 moviepy
-imageio
-wandb
