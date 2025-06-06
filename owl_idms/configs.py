@@ -5,6 +5,18 @@ import yaml
 from omegaconf import OmegaConf
 
 OmegaConf.register_new_resolver("env", lambda k: os.environ.get(k))
+KEYBINDS = ["W","A","S","D","LSHIFT","SPACE","R","F","E", "LMB", "RMB"]
+
+@dataclass
+class STTransformerConfig:
+    depth : int = 4
+    d_model : int = 128
+    num_heads : int = 4
+    token_drop : float = 0.1
+    n_keys : int = len(KEYBINDS)+1 # +1 no idea why
+    img_size : tuple = (128, 128)
+    patch : int = 16
+    frames : int = 16
 
 @dataclass
 class ResNetConfig:
@@ -25,8 +37,9 @@ class ControlPredConfig:
 
     resnet_config: ResNetConfig = None
     transformer_config: TransformerConfig = None
+    st_transformer_config: STTransformerConfig = None
 
-    n_buttons: int = 8 # count LMB and RMB
+    n_buttons: int = 11 # count LMB and RMB
     n_mouse_axes: int = 2
 
 @dataclass
