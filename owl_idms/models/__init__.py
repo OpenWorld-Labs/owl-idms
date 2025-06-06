@@ -1,6 +1,5 @@
 from .resnet_3d import ControlPredictor as ControlPredictorResNet3D
 from .cnn_3d import ControlPredictor as ControlPredictorCNN3D
-from .st_transformer import STInverseDynamics
 
 def get_model_cls(model_id):
     match model_id:
@@ -9,6 +8,7 @@ def get_model_cls(model_id):
         case 'cnn3d':
             return ControlPredictorCNN3D
         case 'st_transformer':
+            from .st_transformer import STInverseDynamics
             return STInverseDynamics
         case _:
             raise NotImplementedError
