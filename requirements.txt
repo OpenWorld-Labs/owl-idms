@@ -9,5 +9,4 @@ tqdm
 omegaconf
 pyyaml
 tqdm
-ema-pytorch
 moviepy
